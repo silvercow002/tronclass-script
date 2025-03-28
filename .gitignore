@@ -2,6 +2,7 @@ tmp/
 .venv
 secret.py
 test*
-*txt
+# *txt
 *log
+log*
 __pycache__/
