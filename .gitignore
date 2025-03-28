@@ -1,0 +1,7 @@
+tmp/
+.venv
+secret.py
+test*
+*txt
+*log
+__pycache__/
