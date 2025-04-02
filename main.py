@@ -8,7 +8,6 @@ from datetime import datetime
 
 tron = 'https://tronclass.ntou.edu.tw'
 session = requests.session()
-sercret = []
 
 header = {
     'Accpet': 'application/json, text/plain, */*',
@@ -29,13 +28,14 @@ def re_visited():
 
 def log(path: Path, cnt: int, response: requests.models.Response):
     data = {
+        'request': response.url,
         'status_code': response.status_code,
         'body': response.json()
     }
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, 'a', encoding='utf-8') as file:
-        file.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | total: {cnt}\n")
+        file.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {cnt}\n")
         file.write(json.dumps(data, ensure_ascii=False, indent=2))
         file.write('\n\n') 
 

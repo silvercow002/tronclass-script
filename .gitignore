@@ -1,8 +1,11 @@
+__pycache__/
+.venv/
+
 tmp/
-.venv
+log/
+
+*log
+*txt
+
 secret.py
 test*
-# *txt
-*log
-log*
-__pycache__/
