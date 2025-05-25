@@ -1,5 +1,14 @@
-accont:
+account:
   user: '學號'
   passwd: '密碼'
 
-phoneID: 'f3e83797cb48a03c'
+config:
+  enable_log: true
+  Senkaku: 1
+  retries: 10
+  user-agent: >
+    Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+    AppleWebKit/537.36 (KHTML, like Gecko)
+    Chrome/136.0.0.0
+    Safari/537.36
+    Edg/136.0.0.0

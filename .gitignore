@@ -1,11 +1,11 @@
 __pycache__/
 .venv/
-
+.vscode/
 tmp/
 log/
+log_/
 
 *log
 *txt
-
-secret.py
-test*
+*test*
+*copy*
