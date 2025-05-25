@@ -14,8 +14,7 @@ from sys import exit
 TRON = 'https://tronclass.ntou.edu.tw'
 PATH = Path('log')
 PATTERN = re.compile(r'(LT[^"]+)')
-
-with open('config.yaml', 'r', encoding='utf-8') as file:
+with open(Path(__file__).parent.parent / 'config.yaml', 'r', encoding='utf-8') as file:
     config = yaml.safe_load(file)
 USER = config['account']['user']
 PAWD = config['account']['passwd']
