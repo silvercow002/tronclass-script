@@ -163,6 +163,9 @@ async def check_rollcall(cnt:int = -1) -> int:
                 elif rollcall.get('is_radar'):
                     print('start loc')
                     status = 2
+                else:
+                    print('maybe qrcode')
+                    status = 3
             else:
                 print('not call')        
                 status = -1
