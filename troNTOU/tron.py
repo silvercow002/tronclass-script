@@ -9,7 +9,9 @@ import string
 from datetime import datetime
 from pathlib import Path
 from sys import exit
-
+from tqdm import tqdm
+from tqdm.asyncio import tqdm_asyncio
+from http.cookies import SimpleCookie
 
 TRON = 'https://tronclass.ntou.edu.tw'
 PATH = Path('log')
@@ -51,31 +53,30 @@ def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
         return False
     return True
 
-async def login(id:int = 0) -> aiohttp.ClientSession:
+async def login(id:int = 0) -> SimpleCookie:
     for attempt in range(RETRIES):
-        session = None
         try:
-            session = aiohttp.ClientSession(headers={
-                'User-Agent': UA
-            })
-            async with session.get(url=f'{TRON}/login?next=/user/index') as page:
-                lt = PATTERN.search(await page.text()).group(0)
-            data = {
-                'username': USER,
-                'password': PAWD,
-                'lt': lt,
-                'execution': 'e1s1',
-                '_eventId': 'submit',
-                'submit': '登錄'
-            }
+            async with aiohttp.ClientSession() as session:
+                session.headers.update({'User-Agent': UA})
 
-            async with session.post(url=page.url, data=data) as response:
-                if 'forget-password' in await response.text():
-                    raise LoginFaild()
-            return session
+                async with session.get(url=f'{TRON}/login?next=/user/index') as page:
+                    lt = PATTERN.search(await page.text()).group(0)
+                data = {
+                    'username': USER,
+                    'password': PAWD,
+                    'lt': lt,
+                    'execution': 'e1s1',
+                    '_eventId': 'submit',
+                    'submit': '登錄'
+                }
+
+                async with session.post(url=page.url, data=data) as resp:
+                    if 'forget-password' in await resp.text():
+                        raise LoginFaild()
+                    cookie = resp.cookies 
+            return cookie
 
         except LoginFaild as e:
-            await session.close()
             if attempt < RETRIES:
                 print(f'login {id} | retry attempt {attempt}')
             else:
@@ -84,7 +85,6 @@ async def login(id:int = 0) -> aiohttp.ClientSession:
                 'check password!\n')
                 return None
         except Exception as e:
-            await session.close()
             print(f'login {id} | {e}')
             return None
 
@@ -200,44 +200,54 @@ async def test_login():
             print(s)
             exit()
 
-async def qps(id:int = -1) -> bool:
-    async def inner(ses_id:int):
-        nonlocal succeed, sent, received
-        async with await login(ses_id) as session:
-            for i in range(ran):
+async def test(count:int = 10000):
+    semaphore = asyncio.Semaphore(1000)
+    path = PATH/'qps'/f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
+    cookie = await login()
+    succeed = 0
+    tmp_log = []
+
+    async def inner(id):
+        nonlocal succeed, tmp_log
+        async with semaphore:
+            for _ in range(5):
                 try:
-                    async with await session.get(
-                        f'{TRON}/api/user/recently-visited-courses'
+                    async with session.get(
+                        f'{TRON}/api/user/recently-visited-courses',
+                        cookies=cookie
                     ) as resp:
-                        # json: dict = await resp.json(encoding='utf-8')
-                        json = dict(ok='ok')
-                        log(PATH/'qps'/f'{id}.log', (str(resp.url), resp.status, json), ses_id*ran+i)
-                        succeed = succeed + 1
-                        sent += int(resp.request_info.headers.get('Content-Length') or 0)
-                        received += len(await resp.read())
+                        data = (
+                            str(resp.url),
+                            resp.status,
+                            await resp.text()
+                        )
+                        tmp_log.append({
+                            'data': data,
+                            'id': id
+                        })
+                        # await log(path, data, id)
+                        succeed += 1
+                        break
                 except Exception as e:
                     print(e)
-    
-    succeed = 0
-    ses = 25
-    ran = 400
-    sent = 0
-    received = 0
-    tasks = [inner(i) for i in range(ses)]
-    print('start QPS testing')
+        return
 
-    start = time.perf_counter()
-    await asyncio.gather(*tasks)
-    spend = time.perf_counter() - start
+    timediff = time.perf_counter()
+    async with aiohttp.ClientSession() as session:
+        tasks = [inner(i) for i in range(count)]
+        results = await tqdm_asyncio.gather(*tasks, desc='testing queries per second')
+    timediff = time.perf_counter()-timediff
 
-    log(PATH/'qps'/f'{id}.log', ('summary', succeed, dict(
-        spend_time = spend,
-        open_session = ses, 
-        request_per_session = ran,
-        total_bytes_sent = sent,
-        total_bytes_received = received
-    )))
-    print('done\nt:', spend)
+
+    from tqdm import tqdm
+    for i in tqdm(tmp_log, desc='saving log file'):
+        log(path, i['data'], i['id'])
+
+    print(f'Total time: {timediff}')
+    print(f'Total request: {succeed}/{count}')
+    print(f'Success rates: {(succeed/count):.2%}')
+    print(f'QPS: {(count/timediff):.2}')
+    print(f'file locatoin: {path}')
     return
 
 async def main():
@@ -253,4 +263,5 @@ async def main():
 if __name__ == "__main__":
     # asyncio.run(qps())
     # asyncio.run(test_login())
-    asyncio.run(main())
+    # asyncio.run(main())
+    asyncio.run(test())
