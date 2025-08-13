@@ -94,6 +94,72 @@ async def re_visited() -> aiohttp.ClientResponse:
         resp = await session.get(f'{TRON}/api/user/recently-visited-courses')
         return resp
 
+async def tmp(rcid: int):
+    succeed = 0
+    semaphore = asyncio.Semaphore(1000)
+    device = random_id()
+    code = ''
+    tmp_log = []
+    async def inner(try_code):
+        nonlocal succeed, code
+        async with semaphore:
+            for _ in range(5):
+                try:
+                    async with session.put(
+                        f'{TRON}/api/rollcall/{rcid}/answer_number_rollcall',
+                        json={
+                            'deviceId': device,
+                            'numberCode': f'{try_code:04d}'
+                        }
+                    ) as resp:
+                        if resp.status == 200:
+                            code = f'{try_code:04d}'
+                        elif resp.status == 400:
+                            print('not right')
+
+                        tmp_log.append({
+                            'data': (
+                                str(resp.url),
+                                resp.status,
+                                await resp.json()
+                            ),
+                            'id': try_code
+                        })
+
+                        succeed += 1
+                except Exception as e:
+                    print(e)
+        return 
+
+    timediff = time.perf_counter()
+    async with aiohttp.ClientSession() as session:
+        session.cookie_jar.update_cookies(await login())
+        tasks = [inner(i) for i in range(10000)]
+        await tqdm_asyncio.gather(*tasks, desc=f'brute-forcing with {rcid}')
+    timediff = time.perf_counter()-timediff
+
+    path = PATH/'num'/f'{rcid}.log'
+    for i in tqdm(tmp_log, desc='saving log file'):
+        log(path, i['data'], i['id'])
+    log(path, (
+        'summary',
+        'code',
+        dict(
+            spend_time = timediff,
+            succeed_cnt = succeed,
+        )
+    ))
+
+    txt = (
+        f'Total time: {timediff}\n'
+        f'Total request: {succeed}/{10000}\n'
+        f'Code: {code}\n'
+    )
+    print(txt)
+
+    return
+
+
 async def number(rcid: int, ses:int = 25, ran:int = 400) -> int:
     async def inner(ses_id:int):
         nonlocal succeed, code
@@ -224,7 +290,6 @@ async def qps(count:int = 10000):
                             'data': data,
                             'id': id
                         })
-                        # await log(path, data, id)
                         succeed += 1
                         break
                 except Exception as e:
@@ -238,16 +303,17 @@ async def qps(count:int = 10000):
         results = await tqdm_asyncio.gather(*tasks, desc='testing queries per second')
     timediff = time.perf_counter()-timediff
 
-
-    from tqdm import tqdm
     for i in tqdm(tmp_log, desc='saving log file'):
         log(path, i['data'], i['id'])
 
-    print(f'Total time: {timediff}')
-    print(f'Total request: {succeed}/{count}')
-    print(f'Success rates: {(succeed/count):.2%}')
-    print(f'QPS: {(count/timediff)}')
-    print(f'file locatoin: {path}')
+    txt = (
+        f'Total time: {timediff}\n'
+        f'Total request: {succeed}/{count}\n'
+        f'Success rates: {(succeed/count):.2%}\n'
+        f'QPS: {(count/timediff)}\n'
+        f'file locatoin: {path}\n'
+    )
+    print(txt)
     return
 
 async def main():
