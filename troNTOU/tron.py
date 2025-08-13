@@ -200,13 +200,12 @@ async def test_login():
             print(s)
             exit()
 
-async def test(count:int = 10000):
+async def qps(count:int = 10000):
     semaphore = asyncio.Semaphore(1000)
     path = PATH/'qps'/f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
-    cookie = await login()
     succeed = 0
     tmp_log = []
-
+                
     async def inner(id):
         nonlocal succeed, tmp_log
         async with semaphore:
@@ -214,7 +213,7 @@ async def test(count:int = 10000):
                 try:
                     async with session.get(
                         f'{TRON}/api/user/recently-visited-courses',
-                        cookies=cookie
+                        # cookies=cookie
                     ) as resp:
                         data = (
                             str(resp.url),
@@ -234,6 +233,7 @@ async def test(count:int = 10000):
 
     timediff = time.perf_counter()
     async with aiohttp.ClientSession() as session:
+        session.cookie_jar.update_cookies(await login())
         tasks = [inner(i) for i in range(count)]
         results = await tqdm_asyncio.gather(*tasks, desc='testing queries per second')
     timediff = time.perf_counter()-timediff
@@ -246,7 +246,7 @@ async def test(count:int = 10000):
     print(f'Total time: {timediff}')
     print(f'Total request: {succeed}/{count}')
     print(f'Success rates: {(succeed/count):.2%}')
-    print(f'QPS: {(count/timediff):.2}')
+    print(f'QPS: {(count/timediff)}')
     print(f'file locatoin: {path}')
     return
 
@@ -261,7 +261,6 @@ async def main():
         await asyncio.sleep(GAP)
 
 if __name__ == "__main__":
-    # asyncio.run(qps())
+    asyncio.run(qps())
     # asyncio.run(test_login())
     # asyncio.run(main())
-    asyncio.run(test())
