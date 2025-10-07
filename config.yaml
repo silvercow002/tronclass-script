@@ -2,6 +2,14 @@ account:
   user: '學號'
   passwd: '密碼'
 
+notifications:
+  tg:
+    enable: False
+    key: 'botxxx:xxx'
+    chat: '123456789'
+
+  
+
 config:
   enable_log: true
   Senkaku: 1
