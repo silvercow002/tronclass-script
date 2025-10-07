@@ -318,13 +318,19 @@ async def qps_num(id:int = -1):
 
 async def main():
     await checklogin()
-
-    cnt = 0
-    while True:
-        print(cnt, end=' ')
-        await check_rollcall(cnt)
-        cnt = cnt + 1
-        await asyncio.sleep(CONFIG['config']['Senkaku'])
+    for _ in range(CONFIG['config']['retries']):
+        try: 
+            cnt = 0
+            while True:
+                print(cnt, end=' ')
+                await check_rollcall(cnt)
+                cnt = cnt + 1
+                await asyncio.sleep(CONFIG['config']['Senkaku'])
+        except Exception as e:
+            text = f'fatal error: retry {_} time\n  ' + str(e)
+            time.sleep(10)
+            print(text)
+            await tg(text)
 
 
 if __name__ == "__main__":
