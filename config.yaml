@@ -5,13 +5,44 @@ account:
 notifications:
   tg:
     enable: False
-    key: 'botxxx:xxx'
-    chat: '123456789'
-
-  
+    key: ''
+    chat: ''
+  dc:
+    enable: False
+    key: ''
+    chat: ''
 
 config:
   enable_log: true
   Senkaku: 1
-  retries: 10
-  user-agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edge/136.0.0.0'
+  retries: 20
+  user-agent: [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edge/136.0.0.0',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.5410.0 Safari/537.36',
+    'Mozilla/5.0 (Android 10; Mobile; rv:78.0) Gecko/20100101 Firefox/78.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:83.0) Gecko/20100101 Firefox/83.0',
+    ' Mozilla/5.0 (SymbianOS/9.4; Series60/5.0 NokiaN97-1/20.0.019; Profile/MIDP-2.1 Configuration/CLDC-1.1) AppleWebKit/525 (KHTML, like Gecko) BrowserNG/7.1.18124'
+  ]
+  
+operating:
+  0:
+    enable: False
+    range: ["9:00", "17:00"]
+  1:
+    enable: True
+    range: ["9:00", "17:00"]
+  2:
+    enable: True
+    range: ["9:00", "17:00"]
+  3:
+    enable: True
+    range: ["9:00", "17:00"]
+  4:
+    enable: True
+    range: ["9:00", "17:00"]
+  5:
+    enable: True
+    range: ["9:00", "17:00"]
+  6:
+    enable: False
+    range: ["9:00", "17:00"]
