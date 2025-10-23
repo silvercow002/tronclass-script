@@ -6,12 +6,14 @@
 ## Requirements
 
 - Python 3.8+
+- Tesseract-OCR
 
 ## Features
 - Wait for rollcall to start and automatically answer
     - number
-    <!-- - radar  -->
-<!-- - Get notifications via Apprise -->
+- use SNS to notifitons
+    - telegram
+    - discord
 
 ## Installation
 1. Install required packages
@@ -37,5 +39,4 @@ python3 tron.py
 ---
 ## TODO
 - radar
-- notify(ex. telegram)
-- upload sometime
+- more log output
