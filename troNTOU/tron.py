@@ -57,31 +57,40 @@ def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
 
 async def mes(text:str = 'test message'):
     text = f"{CONFIG['account']['user']}  \n" + text
-
     if CONFIG['notifications']['tg']['enable']:
-        async with aiohttp.request(
-            method= 'POST',
-            url=f"https://api.telegram.org/{CONFIG['notifications']['tg']['key']}/sendMessage",
-            data = {
-                'chat_id': f"{CONFIG['notifications']['tg']['chat']}",
-                'text': text
-            }
-        ) as resp:
-            pass
+        for attempt in range(CONFIG['config']['retries']):
+            try:
+                async with aiohttp.request(
+                    method= 'POST',
+                    url=f"https://api.telegram.org/{CONFIG['notifications']['tg']['key']}/sendMessage",
+                    data = {
+                        'chat_id': f"{CONFIG['notifications']['tg']['chat']}",
+                        'text': text
+                    }
+                ) as resp:
+                    pass
+                break
+            except Exception as e:
+                pass
     if CONFIG['notifications']['dc']['enable']:
-        header = {
-            'Authorization': f"Bot {CONFIG['notifications']['dc']['key']}",
-            'Content-Type': 'application/json'
-        }
-        async with aiohttp.request(
-            method='POST',
-            url=f"https://discord.com/api/v10/channels/{CONFIG['notifications']['dc']['chat']}/messages",
-            headers=header,
-            json={
-                "content": text
-            }
-        ) as resp:
-            pass
+        for attempt in range(CONFIG['config']['retries']):
+            try:
+                header = {
+                    'Authorization': f"Bot {CONFIG['notifications']['dc']['key']}",
+                    'Content-Type': 'application/json'
+                }
+                async with aiohttp.request(
+                    method='POST',
+                    url=f"https://discord.com/api/v10/channels/{CONFIG['notifications']['dc']['chat']}/messages",
+                    headers=header,
+                    json={
+                        "content": text
+                    }
+                ) as resp:
+                    pass
+                break
+            except Exception as e:
+                pass
     return
 
     
