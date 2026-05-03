@@ -5,7 +5,7 @@ import time
 import re
 import json
 import random
-import string 
+import string
 from datetime import datetime
 from pathlib import Path
 from sys import exit
@@ -15,12 +15,30 @@ from http.cookies import SimpleCookie
 from PIL import Image
 import pytesseract
 import io
+import argparse
 
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# open if your env is windows 
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 TRON = 'https://tronclass.ntou.edu.tw'
-PATH = Path('log')
 PATTERN = re.compile(r'(LT[^"]+)')
-with open(Path(__file__).parent.parent / 'config.yaml', 'r', encoding='utf-8') as file:
+
+parser = argparse.ArgumentParser(description='here is not descroption')
+parser.add_argument('-c', '--config', type=str, help="Path to YAML config file")
+parser.add_argument('-l', '--log', type=str, help="Path to save file location")
+args = parser.parse_args()
+
+if args.log:
+    LOGPATH = Path(args.log)
+else:
+    LOGPATH = Path(__file__).parent.parent / 'log'
+
+if args.config:
+    YAMLPATH = Path(args.config)
+else:
+    YAMLPATH = Path(__file__).parent.parent / 'config.yaml'
+    pass
+
+with open(YAMLPATH, 'r', encoding='utf-8') as file:
     CONFIG = yaml.safe_load(file)
 
 class LoginFaild(Exception):
@@ -31,9 +49,13 @@ def random_id() -> str:
     chars = string.ascii_letters + string.digits
     return ''.join(random.choices(chars, k=16))
 
-def random_ua() -> str:
-    ua_list = CONFIG['config']['user-agent']
-    return random.choice(ua_list)
+
+def create_session() -> aiohttp.ClientSession:
+    con = aiohttp.TCPConnector(ssl=False)
+    header = {
+        'User-Agent': "https://explore.whatismybrowser.com/useragents/parse/353786-ovi-symbian-nokia-3310-gecko"
+    }
+    return aiohttp.ClientSession(connector=con, headers=header)
 
 def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
     if not CONFIG['config']['enable_log']:
@@ -49,7 +71,7 @@ def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
         with open(path, 'a', encoding='utf-8') as file:
             file.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {cnt}\n")
             file.write(json.dumps(data, ensure_ascii=False, indent=2))
-            file.write('\n') 
+            file.write('\n')
     except Exception as e:
         print(e)
         return False
@@ -57,44 +79,52 @@ def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
 
 async def mes(text:str = 'test message'):
     text = f"{CONFIG['account']['user']}  \n" + text
-
     if CONFIG['notifications']['tg']['enable']:
-        async with aiohttp.request(
-            method= 'POST',
-            url=f"https://api.telegram.org/{CONFIG['notifications']['tg']['key']}/sendMessage",
-            data = {
-                'chat_id': f"{CONFIG['notifications']['tg']['chat']}",
-                'text': text
-            }
-        ) as resp:
-            pass
+        for attempt in range(CONFIG['config']['retries']):
+            try:
+                async with aiohttp.request(
+                    method= 'POST',
+                    url=f"https://api.telegram.org/{CONFIG['notifications']['tg']['key']}/sendMessage",
+                    data = {
+                        'chat_id': f"{CONFIG['notifications']['tg']['chat']}",
+                        'text': text
+                    }
+                ) as resp:
+                    pass
+                break
+            except Exception as e:
+                pass
     if CONFIG['notifications']['dc']['enable']:
-        header = {
-            'Authorization': f"Bot {CONFIG['notifications']['dc']['key']}",
-            'Content-Type': 'application/json'
-        }
-        async with aiohttp.request(
-            method='POST',
-            url=f"https://discord.com/api/v10/channels/{CONFIG['notifications']['dc']['chat']}/messages",
-            headers=header,
-            json={
-                "content": text
-            }
-        ) as resp:
-            pass
+        for attempt in range(CONFIG['config']['retries']):
+            try:
+                header = {
+                    'Authorization': f"Bot {CONFIG['notifications']['dc']['key']}",
+                    'Content-Type': 'application/json'
+                }
+                async with aiohttp.request(
+                    method='POST',
+                    url=f"https://discord.com/api/v10/channels/{CONFIG['notifications']['dc']['chat']}/messages",
+                    headers=header,
+                    json={
+                        "content": text
+                    }
+                ) as resp:
+                    pass
+                break
+            except Exception as e:
+                pass
     return
 
-    
+
 
 async def login(id:int = 0) -> SimpleCookie:
     for attempt in range(CONFIG['config']['retries']):
         try:
-            async with aiohttp.ClientSession() as session:
-                session.headers.update({'User-Agent': random_ua()})
+            async with create_session() as session:
 
                 async with session.get(url=f'{TRON}/login?next=/user/index') as lt_page:
                     lt = PATTERN.search(await lt_page.text()).group(0)
-                
+
                 async with session.get(url='https://tccas.ntou.edu.tw/cas/captcha.jpg') as captcha_page:
                     byte = await captcha_page.read()
                     stream = io.BytesIO(byte)
@@ -116,7 +146,7 @@ async def login(id:int = 0) -> SimpleCookie:
                 async with session.post(url=lt_page.url, data=data) as resp:
                     if 'forget-password' in await resp.text():
                         raise LoginFaild()
-                    cookie = resp.cookies 
+                    cookie = resp.cookies
             return cookie
 
         except LoginFaild as e:
@@ -152,54 +182,52 @@ async def number(rcid: int):
 
         nonlocal succeed, code
         async with semaphore:
-            for _ in range(10):
-                try:
-                    async with session.put(
-                        f'{TRON}/api/rollcall/{rcid}/answer_number_rollcall',
-                        json={
-                            'deviceId': device,
-                            'numberCode': f'{try_code:04d}'
-                        },
-                    ) as resp:
-                        if resp.status == 200:
-                            code = f'{try_code:04d}'
-                            print(code)
-                            await mes(code)
+            try:
+                async with session.put(
+                    f'{TRON}/api/rollcall/{rcid}/answer_number_rollcall',
+                    json={
+                        'deviceId': device,
+                        'numberCode': f'{try_code:04d}'
+                    },
+                ) as resp:
+                    if resp.status == 200:
+                        code = f'{try_code:04d}'
+                        print(code)
+                        await mes(code)
 
-                        elif resp.status == 400:
-                            pass
+                    elif resp.status == 400:
+                        pass
 
-                        tmp_log.append({
-                            'data': (
-                                str(resp.url),
-                                resp.status,
-                                await resp.json()
-                            ),
-                            'id': try_code
-                        })
-
-                        succeed += 1
-                    break
-                except Exception as e:
                     tmp_log.append({
-                            'data': (
-                                str(resp.url),
-                                resp.status,
-                                str(e) + await resp.text()
-                            ),
-                            'id': try_code
-                        })
-                    await asyncio.sleep(5)
+                        'data': (
+                            str(resp.url),
+                            resp.status,
+                            await resp.json()
+                        ),
+                        'id': try_code
+                    })
+
+                    succeed += 1
+            except Exception as e:
+                tmp_log.append({
+                        'data': (
+                            str(resp.url),
+                            resp.status,
+                            str(e) + await resp.text()
+                        ),
+                        'id': try_code
+                    })
+                await asyncio.sleep(5)
         return
 
     timediff = time.perf_counter()
-    async with aiohttp.ClientSession() as session:
+    async with create_session() as session:
         session.cookie_jar.update_cookies(await login())
         tasks = [inner(i, session) for i in range(10000)]
         await tqdm_asyncio.gather(*tasks, desc=f'brute-forcing with {rcid}')
     timediff = time.perf_counter()-timediff
 
-    path = PATH/'num'/f'{rcid}.log'
+    path = LOGPATH/'num'/f'{rcid}.log'
     for i in tqdm(tmp_log, desc='saving log file'):
         log(path, i['data'], i['id'])
     log(path, (
@@ -227,7 +255,7 @@ async def check_rollcall(session: aiohttp.ClientSession, cnt:int = -1) -> int:
         y = str(today.year)
         m = str(today.month)
         d = str(today.day)
-        log(PATH/y/m/f'{d}.log', (str(resp.url), resp.status, json), cnt)
+        log(LOGPATH/y/m/f'{d}.log', (str(resp.url), resp.status, json), cnt)
 
         if json.get('rollcalls'):
             rollcall: dict = json['rollcalls'][0]
@@ -250,7 +278,7 @@ async def check_rollcall(session: aiohttp.ClientSession, cnt:int = -1) -> int:
                 print('maybe qrcode')
                 status = 3
         else:
-            print('not call')        
+            print('not call')
             status = -1
     return status
 
@@ -258,15 +286,13 @@ async def check_rollcall(session: aiohttp.ClientSession, cnt:int = -1) -> int:
 
 #  check env ===========================================================
 async def checkpw():
-    async with aiohttp.ClientSession(headers={
-        'User-Agent': random_ua()
-    }) as session:
+    async with create_session() as session:
         async with session.get('https://api.ipify.org') as resp:
             ip = await resp.text()
 
         async with session.get(url=f'{TRON}/login?next=/user/index') as page:
             lt = PATTERN.search(await page.text()).group(0)
-    
+
         for attempt in range(CONFIG['config']['retries']):
             try:
                 async with session.get(url='https://tccas.ntou.edu.tw/cas/captcha.jpg') as captcha_page:
@@ -276,7 +302,7 @@ async def checkpw():
                     captcha = captcha.convert('L')
                     text = pytesseract.image_to_string(captcha, config='-c tessedit_char_whitelist=0123456789 --psm 8')
                     cap = re.sub(r'[^0-9]', '', text)
-            
+
                 async with session.post(url=page.url, data={
                     'username': CONFIG['account']['user'],
                     'password': CONFIG['account']['passwd'],
@@ -288,13 +314,11 @@ async def checkpw():
                 }) as resp:
                     if 'forget-password' in await resp.text():
                         raise LoginFaild()
-                    ua = resp.request_info.headers.get('User-Agent')
 
 
             except LoginFaild as e:
                 if attempt < CONFIG['config']['retries']:
                     text = (
-
                         f'check login error on {attempt}\n  '
                     )
                     print(text)
@@ -310,7 +334,6 @@ async def checkpw():
             except Exception as e:
                 print(e)
     text = (
-        f'{ua}  \n'
         f'login succeed\nuser: {CONFIG["account"]["user"]}  \n'
         f'ip: {ip}'
     )
@@ -320,10 +343,10 @@ async def checkpw():
 
 async def qps(count:int = 10000):
     semaphore = asyncio.Semaphore(2000)
-    path = PATH/'qps'/f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
+    path = LOGPATH/'qps'/f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
     succeed = 0
     tmp_log = []
-                
+
     async def inner(id):
         nonlocal succeed, tmp_log
         async with semaphore:
@@ -348,7 +371,7 @@ async def qps(count:int = 10000):
         return
 
     timediff = time.perf_counter()
-    async with aiohttp.ClientSession() as session:
+    async with create_session() as session:
         session.cookie_jar.update_cookies(await login())
         tasks = [inner(i) for i in range(count)]
         await tqdm_asyncio.gather(*tasks, desc='testing queries per second')
@@ -376,12 +399,13 @@ cnt = 0
 async def main():
     global cnt
     flag_day_night = False
-    async with aiohttp.ClientSession() as session:
+    flag_working = False
+    async with create_session() as session:
         session.cookie_jar.update_cookies(await login())
         error_cnt = 0
         while True:
             print(cnt, end=' ')
-            
+
             today = datetime.today().weekday()
             schedule = CONFIG['operating'][today]
             range_str = schedule['range']
@@ -412,10 +436,20 @@ async def main():
 
             try:
                 await check_rollcall(session, cnt)
+                if not flag_working:
+                    flag_working = True
+                    text = 'has been restored'
+                    print(text)
+                    await mes(text)
             except Exception as e:
+                if flag_working:
+                    flag_working = False
+                    text = 'fuck up'
+                    print(text)
+                    await mes(text)
+
                 if error_cnt < CONFIG['config']['retries']:
                     text = (
-                        f'{CONFIG["account"]["user"]}:  \n'
                         f'check rollcall error on {cnt}  \n'
                         f'trying {error_cnt} times  \n'
                         f'error message: {e}'
@@ -429,21 +463,21 @@ async def main():
             cnt = cnt+1
             time.sleep(CONFIG['config']['Senkaku'])
 
-        
+
 
 
 
 if __name__ == "__main__":
-    asyncio.run(checkpw())
+    # asyncio.run(checkpw())
     asyncio.run(qps_num())
-    while True:
-        try:
-            asyncio.run(main())
-        except Exception as e:
-            text = (
-                f'fatal error on {cnt}  \n'
-                f'trying...  \n'
-                f'{e}'
-            )
-            print(text)
-            asyncio.run(mes(text))            
+    # while True:
+    #     try:
+    #         asyncio.run(main())
+    #     except Exception as e:
+    #         text = (
+    #             f'fatal error on {cnt}  \n'
+    #             f'trying...  \n'
+    #             f'{e}'
+    #         )
+    #         print(text)
+    #         asyncio.run(mes(text))
