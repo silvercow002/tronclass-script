@@ -17,9 +17,12 @@ import pytesseract
 import io
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-TRON = 'https://tronclass.ntou.edu.tw'
+# TRON = 'https://tronclass.ntou.edu.tw'
+TRON = 'https://tronclass.cjcu.edu.tw'
 PATH = Path('log')
-PATTERN = re.compile(r'(LT[^"]+)')
+# PATTERN = re.compile(r'(LT[^"]+)')
+PATTERN = re.compile(r'action="([^"]+)"')
+
 with open(Path(__file__).parent.parent / 'config.yaml', 'r', encoding='utf-8') as file:
     CONFIG = yaml.safe_load(file)
 
@@ -34,6 +37,13 @@ def random_id() -> str:
 def random_ua() -> str:
     ua_list = CONFIG['config']['user-agent']
     return random.choice(ua_list)
+
+def create_session() -> aiohttp.ClientSession:
+        con = aiohttp.TCPConnector(ssl=False)
+        header = {
+            'User-Agent': random_ua()
+        }
+        return aiohttp.ClientSession(connector=con, headers=header)
 
 def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
     if not CONFIG['config']['enable_log']:
@@ -89,31 +99,32 @@ async def mes(text:str = 'test message'):
 async def login(id:int = 0) -> SimpleCookie:
     for attempt in range(CONFIG['config']['retries']):
         try:
-            async with aiohttp.ClientSession() as session:
-                session.headers.update({'User-Agent': random_ua()})
+            async with create_session() as session:
 
-                async with session.get(url=f'{TRON}/login?next=/user/index') as lt_page:
-                    lt = PATTERN.search(await lt_page.text()).group(0)
+                async with session.get(url=f'{TRON}/login?next=/user/index') as page:
+                    redirect_url = PATTERN.search(await page.text()).group(1)
+                    redirect_url = redirect_url.replace('&amp;', '&')
+                    # lt = PATTERN.search(await lt_page.text()).group(0)
                 
-                async with session.get(url='https://tccas.ntou.edu.tw/cas/captcha.jpg') as captcha_page:
-                    byte = await captcha_page.read()
-                    stream = io.BytesIO(byte)
-                    captcha = Image.open(stream)
-                    captcha = captcha.convert('L')
-                    text = pytesseract.image_to_string(captcha, config='-c tessedit_char_whitelist=0123456789 --psm 8')
-                    cap = re.sub(r'[^0-9]', '', text)
+                # async with session.get(url='https://tccas.ntou.edu.tw/cas/captcha.jpg') as captcha_page:
+                #     byte = await captcha_page.read()
+                #     stream = io.BytesIO(byte)
+                #     captcha = Image.open(stream)
+                #     captcha = captcha.convert('L')
+                #     text = pytesseract.image_to_string(captcha, config='-c tessedit_char_whitelist=0123456789 --psm 8')
+                #     cap = re.sub(r'[^0-9]', '', text)
 
                 data = {
                     'username': CONFIG['account']['user'],
                     'password': CONFIG['account']['passwd'],
-                    'captcha': cap,
-                    'lt': lt,
-                    'execution': 'e1s1',
-                    '_eventId': 'submit',
-                    'submit': '登錄'
+                    # 'captcha': cap,
+                    # 'lt': lt,
+                    # 'execution': 'e1s1',
+                    # '_eventId': 'submit',
+                    # 'submit': '登錄'
                 }
 
-                async with session.post(url=lt_page.url, data=data) as resp:
+                async with session.post(url=redirect_url, data=data) as resp:
                     if 'forget-password' in await resp.text():
                         raise LoginFaild()
                     cookie = resp.cookies 
@@ -193,7 +204,7 @@ async def number(rcid: int):
         return
 
     timediff = time.perf_counter()
-    async with aiohttp.ClientSession() as session:
+    async with create_session() as session:
         session.cookie_jar.update_cookies(await login())
         tasks = [inner(i, session) for i in range(10000)]
         await tqdm_asyncio.gather(*tasks, desc=f'brute-forcing with {rcid}')
@@ -258,37 +269,36 @@ async def check_rollcall(session: aiohttp.ClientSession, cnt:int = -1) -> int:
 
 #  check env ===========================================================
 async def checkpw():
-    async with aiohttp.ClientSession(headers={
-        'User-Agent': random_ua()
-    }) as session:
+    async with create_session() as session:
         async with session.get('https://api.ipify.org') as resp:
             ip = await resp.text()
 
-        async with session.get(url=f'{TRON}/login?next=/user/index') as page:
-            lt = PATTERN.search(await page.text()).group(0)
+        async with session.get(url=f'{TRON}/login?next=/user/index', ssl=False) as page:
+            redirect_url = PATTERN.search(await page.text()).group(1)
+            redirect_url = redirect_url.replace('&amp;', '&')
+            # print(PATTERN.search(await page.text()).group(1))
     
         for attempt in range(CONFIG['config']['retries']):
             try:
-                async with session.get(url='https://tccas.ntou.edu.tw/cas/captcha.jpg') as captcha_page:
-                    byte = await captcha_page.read()
-                    stream = io.BytesIO(byte)
-                    captcha = Image.open(stream)
-                    captcha = captcha.convert('L')
-                    text = pytesseract.image_to_string(captcha, config='-c tessedit_char_whitelist=0123456789 --psm 8')
-                    cap = re.sub(r'[^0-9]', '', text)
+                # async with session.get(url='https://tccas.ntou.edu.tw/cas/captcha.jpg') as captcha_page:
+                #     byte = await captcha_page.read()
+                #     stream = io.BytesIO(byte)
+                #     captcha = Image.open(stream)
+                #     captcha = captcha.convert('L')
+                #     text = pytesseract.image_to_string(captcha, config='-c tessedit_char_whitelist=0123456789 --psm 8')
+                #     cap = re.sub(r'[^0-9]', '', text)
             
-                async with session.post(url=page.url, data={
+                async with session.post(url=redirect_url, data={
                     'username': CONFIG['account']['user'],
                     'password': CONFIG['account']['passwd'],
-                    'captcha': cap,
-                    'lt': lt,
-                    'execution': 'e1s1',
-                    '_eventId': 'submit',
-                    'submit': '登錄'
+                    # 'captcha': cap,
+                    # 'lt': lt,
+                    # 'execution': 'e1s1',
+                    # '_eventId': 'submit',
+                    # 'submit': '登錄'
                 }) as resp:
                     if 'forget-password' in await resp.text():
                         raise LoginFaild()
-                    ua = resp.request_info.headers.get('User-Agent')
 
 
             except LoginFaild as e:
@@ -310,7 +320,6 @@ async def checkpw():
             except Exception as e:
                 print(e)
     text = (
-        f'{ua}  \n'
         f'login succeed\nuser: {CONFIG["account"]["user"]}  \n'
         f'ip: {ip}'
     )
@@ -348,7 +357,7 @@ async def qps(count:int = 10000):
         return
 
     timediff = time.perf_counter()
-    async with aiohttp.ClientSession() as session:
+    async with create_session() as session:
         session.cookie_jar.update_cookies(await login())
         tasks = [inner(i) for i in range(count)]
         await tqdm_asyncio.gather(*tasks, desc='testing queries per second')
@@ -376,7 +385,7 @@ cnt = 0
 async def main():
     global cnt
     flag_day_night = False
-    async with aiohttp.ClientSession() as session:
+    async with create_session() as session:
         session.cookie_jar.update_cookies(await login())
         error_cnt = 0
         while True:
