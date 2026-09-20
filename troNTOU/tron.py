@@ -1,483 +1,205 @@
-import aiohttp
-import yaml
-import asyncio
-import time
+import requests
+import random 
+import string
 import re
 import json
-import random
-import string
-from datetime import datetime
-from pathlib import Path
-from sys import exit
-from tqdm import tqdm
-from tqdm.asyncio import tqdm_asyncio
-from http.cookies import SimpleCookie
+from tenacity import retry ,wait_random
+
+from pytesseract import image_to_string, pytesseract
 from PIL import Image
-import pytesseract
-import io
-import argparse
+from io import BytesIO
 
-# open if your env is windows 
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-TRON = 'https://tronclass.ntou.edu.tw'
-PATTERN = re.compile(r'(LT[^"]+)')
-
-parser = argparse.ArgumentParser(description='here is not descroption')
-parser.add_argument('-c', '--config', type=str, help="Path to YAML config file")
-parser.add_argument('-l', '--log', type=str, help="Path to save file location")
-args = parser.parse_args()
-
-if args.log:
-    LOGPATH = Path(args.log)
-else:
-    LOGPATH = Path(__file__).parent.parent / 'log'
-
-if args.config:
-    YAMLPATH = Path(args.config)
-else:
-    YAMLPATH = Path(__file__).parent.parent / 'config.yaml'
-    pass
-
-with open(YAMLPATH, 'r', encoding='utf-8') as file:
-    CONFIG = yaml.safe_load(file)
 
 class LoginFaild(Exception):
-    def __init__(self, message='Login failed!'):
+    def __init__(self, message='Login Failed!\n'):
         super().__init__(message)
 
-def random_id() -> str:
-    chars = string.ascii_letters + string.digits
-    return ''.join(random.choices(chars, k=16))
+class Tronclass:
+    TRON = 'https://tronclass.ntou.edu.tw'
+    PATTERN = re.compile(r'(LT[^"]+)')
+    CAPTCAHJPG = 'https://tccas.ntou.edu.tw/cas/captcha.jpg'
+
+    # enable if this script run on windows
+    pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+    def __init__(self, account, config):
+        self.USER = account['user']
+        self.PASSWD = account['passwd']
+        self.CONFIG = config
+
+        self.counter = 0
+        self.device_id = ''.join(
+            random.choices(string.ascii_letters+string.digits, k=16)
+        )
+
+        self.session: requests.Session
+        self.rcid: int
+        self.num_code: int
 
 
-def create_session() -> aiohttp.ClientSession:
-    con = aiohttp.TCPConnector(ssl=False)
-    header = {
-        'User-Agent': "https://explore.whatismybrowser.com/useragents/parse/353786-ovi-symbian-nokia-3310-gecko"
-    }
-    return aiohttp.ClientSession(connector=con, headers=header)
+    def set_session(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': random.choice([
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.5410.0 Safari/537.36',
+                'Mozilla/5.0 (Android 10; Mobile; rv:78.0) Gecko/20100101 Firefox/78.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:83.0) Gecko/20100101 Firefox/83.0',
+                'Mozilla/5.0 (SymbianOS/9.4; Series60/5.0 NokiaN97-1/20.0.019; Profile/MIDP-2.1 Configuration/CLDC-1.1) AppleWebKit/525 (KHTML, like Gecko) BrowserNG/7.1.18124'   
+            ]),
+            'Accept': (
+                'text/html,application/xhtml+xml,'
+                'application/xml;q=0.9,*/*;q=0.8'
+            ),
+            'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+        })
+        self.session.hooks["response"].append(
+            lambda response, *args, **kwargs: response.raise_for_status()
+        )
 
-def log(path:Path, resp:tuple[str, int, dict], cnt:int = -1) -> bool:
-    if not CONFIG['config']['enable_log']:
-        return False
-
-    try:
-        data = {
-            'request': resp[0],
-            'status_code': resp[1],
-            'body': resp[2]
-        }
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'a', encoding='utf-8') as file:
-            file.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {cnt}\n")
-            file.write(json.dumps(data, ensure_ascii=False, indent=2))
-            file.write('\n')
-    except Exception as e:
-        print(e)
-        return False
-    return True
-
-async def mes(text:str = 'test message'):
-    text = f"{CONFIG['account']['user']}  \n" + text
-    if CONFIG['notifications']['tg']['enable']:
-        for attempt in range(CONFIG['config']['retries']):
-            try:
-                async with aiohttp.request(
-                    method= 'POST',
-                    url=f"https://api.telegram.org/{CONFIG['notifications']['tg']['key']}/sendMessage",
-                    data = {
-                        'chat_id': f"{CONFIG['notifications']['tg']['chat']}",
-                        'text': text
-                    }
-                ) as resp:
-                    pass
-                break
-            except Exception as e:
-                pass
-    if CONFIG['notifications']['dc']['enable']:
-        for attempt in range(CONFIG['config']['retries']):
-            try:
-                header = {
-                    'Authorization': f"Bot {CONFIG['notifications']['dc']['key']}",
-                    'Content-Type': 'application/json'
-                }
-                async with aiohttp.request(
-                    method='POST',
-                    url=f"https://discord.com/api/v10/channels/{CONFIG['notifications']['dc']['chat']}/messages",
-                    headers=header,
-                    json={
-                        "content": text
-                    }
-                ) as resp:
-                    pass
-                break
-            except Exception as e:
-                pass
-    return
-
-
-
-async def login(id:int = 0) -> SimpleCookie:
-    for attempt in range(CONFIG['config']['retries']):
+    @retry(
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']),
+        wait=wait_random(min=1, max=1),
+        reraise=True
+    )
+    def login(self) -> None:
+        self.counter += 1
         try:
-            async with create_session() as session:
+            self.set_session()
+            
+            lt_page = self.session.get(
+                url=f'{Tronclass.TRON}/login?next=/user/index'
+            )
+            lt = Tronclass.PATTERN.search(lt_page.text).group(0)
 
-                async with session.get(url=f'{TRON}/login?next=/user/index') as lt_page:
-                    lt = PATTERN.search(await lt_page.text()).group(0)
+            jpg = self.session.get(
+                url=Tronclass.CAPTCAHJPG
+            )
+            captcha = Image.open(BytesIO(jpg.content)).convert('L')
+            text = re.sub(r'[^0-9]', '', image_to_string(
+                captcha,
+                config='-c tessedit_char_whitelist=0123456789 --psm 8')
+            )
 
-                async with session.get(url='https://tccas.ntou.edu.tw/cas/captcha.jpg') as captcha_page:
-                    byte = await captcha_page.read()
-                    stream = io.BytesIO(byte)
-                    captcha = Image.open(stream)
-                    captcha = captcha.convert('L')
-                    text = pytesseract.image_to_string(captcha, config='-c tessedit_char_whitelist=0123456789 --psm 8')
-                    cap = re.sub(r'[^0-9]', '', text)
+            data = {
+                'username': self.USER,
+                'password': self.PASSWD,
+                'captcha': text,
+                'lt': lt,
+                'execution': 'e1s1',
+                '_eventId': 'submit',
+                'submit': '登錄'
+            }
 
-                data = {
-                    'username': CONFIG['account']['user'],
-                    'password': CONFIG['account']['passwd'],
-                    'captcha': cap,
-                    'lt': lt,
-                    'execution': 'e1s1',
-                    '_eventId': 'submit',
-                    'submit': '登錄'
-                }
+            resp = self.session.post(
+                url=lt_page.url,
+                data=data
+            )
+            if 'forget-password' in resp.text:
+                raise LoginFaild()
 
-                async with session.post(url=lt_page.url, data=data) as resp:
-                    if 'forget-password' in await resp.text():
-                        raise LoginFaild()
-                    cookie = resp.cookies
-            return cookie
-
-        except LoginFaild as e:
-            if attempt < CONFIG['config']['retries']:
-
-                print(f'login {id} | retry attempt {attempt}')
-            else:
-                print('Max retries reached! login failed')
-                print('username or password may be incorrect\n' \
-                'check password!\n')
-                return None
-        except Exception as e:
-            print(f'login {id} | {e}')
-            return None
-
-
-# api endpoint ===================================================================================
-async def re_visited(session:aiohttp.ClientSession) -> aiohttp.ClientResponse:
-    resp = await session.get(f'{TRON}/api/user/recently-visited-courses')
-    return resp
-
-async def number(rcid: int):
-    succeed = 0
-    ralled = False
-    semaphore = asyncio.Semaphore(2000)
-    device = random_id()
-    code = 'NA'
-    tmp_log = []
-
-    async def inner(try_code, session):
-        if ralled:
             return
 
-        nonlocal succeed, code
-        async with semaphore:
-            try:
-                async with session.put(
-                    f'{TRON}/api/rollcall/{rcid}/answer_number_rollcall',
-                    json={
-                        'deviceId': device,
-                        'numberCode': f'{try_code:04d}'
-                    },
-                ) as resp:
-                    if resp.status == 200:
-                        code = f'{try_code:04d}'
-                        print(code)
-                        await mes(code)
+        except LoginFaild as e:
+            print(f'{e} | {self.counter}\n')
+            raise
 
-                    elif resp.status == 400:
-                        pass
+        except Exception as e:
+            print(f'{e} | {self.counter}\n')
 
-                    tmp_log.append({
-                        'data': (
-                            str(resp.url),
-                            resp.status,
-                            await resp.json()
-                        ),
-                        'id': try_code
-                    })
-
-                    succeed += 1
-            except Exception as e:
-                tmp_log.append({
-                        'data': (
-                            str(resp.url),
-                            resp.status,
-                            str(e) + await resp.text()
-                        ),
-                        'id': try_code
-                    })
-                await asyncio.sleep(5)
-        return
-
-    timediff = time.perf_counter()
-    async with create_session() as session:
-        session.cookie_jar.update_cookies(await login())
-        tasks = [inner(i, session) for i in range(10000)]
-        await tqdm_asyncio.gather(*tasks, desc=f'brute-forcing with {rcid}')
-    timediff = time.perf_counter()-timediff
-
-    path = LOGPATH/'num'/f'{rcid}.log'
-    for i in tqdm(tmp_log, desc='saving log file'):
-        log(path, i['data'], i['id'])
-    log(path, (
-        'summary',
-        'code',
-        dict(
-            spend_time = timediff,
-            succeed_cnt = succeed,
+    ### pure api endpoint
+    @retry(
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
+    )
+    def re_visited(self) -> str:
+        resp = self.session.get(
+            url = f'{Tronclass.TRON}/api/user/recently-visited-courses'
         )
-    ))
-
-    text = (
-        f'Total time: {timediff}  \n'
-        f'Total request: {succeed}/{10000}  \n'
-        f'Code: {code}\n'
+        return json.loads(resp.text)
+    
+    @retry(
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
-    print(text)
-    await mes(text)
-    return
+    def rollcall(self) -> dict:
+        resp = self.session.get(
+            url=f'{Tronclass.TRON}/api/radar/rollcalls?api_version=1.1.0'
+        )
+        return json.loads(resp.text)
 
-async def check_rollcall(session: aiohttp.ClientSession, cnt:int = -1) -> int:
-    async with session.get(f'{TRON}/api/radar/rollcalls?api_version=1.1.0') as resp:
-        json: dict = await resp.json(encoding='utf-8')
-        today = datetime.now()
-        y = str(today.year)
-        m = str(today.month)
-        d = str(today.day)
-        log(LOGPATH/y/m/f'{d}.log', (str(resp.url), resp.status, json), cnt)
-
-        if json.get('rollcalls'):
-            rollcall: dict = json['rollcalls'][0]
-            if rollcall.get('status') == 'on_call_fine':
-                print('rollcalled')
-                status = 0
-
-            elif rollcall.get('is_number'):
-                id = rollcall.get('rollcall_id')
-                text = f'start num\n  id:{id}'
-                print(text)
-                await mes(text)
-                await number(id)
-                status = 1
-
-            elif rollcall.get('is_radar'):
-                print('start loc')
-                status = 2
-            else:
-                print('maybe qrcode')
-                status = 3
-        else:
-            print('not call')
-            status = -1
-    return status
-
-
-
-#  check env ===========================================================
-async def checkpw():
-    async with create_session() as session:
-        async with session.get('https://api.ipify.org') as resp:
-            ip = await resp.text()
-
-        async with session.get(url=f'{TRON}/login?next=/user/index') as page:
-            lt = PATTERN.search(await page.text()).group(0)
-
-        for attempt in range(CONFIG['config']['retries']):
-            try:
-                async with session.get(url='https://tccas.ntou.edu.tw/cas/captcha.jpg') as captcha_page:
-                    byte = await captcha_page.read()
-                    stream = io.BytesIO(byte)
-                    captcha = Image.open(stream)
-                    captcha = captcha.convert('L')
-                    text = pytesseract.image_to_string(captcha, config='-c tessedit_char_whitelist=0123456789 --psm 8')
-                    cap = re.sub(r'[^0-9]', '', text)
-
-                async with session.post(url=page.url, data={
-                    'username': CONFIG['account']['user'],
-                    'password': CONFIG['account']['passwd'],
-                    'captcha': cap,
-                    'lt': lt,
-                    'execution': 'e1s1',
-                    '_eventId': 'submit',
-                    'submit': '登錄'
-                }) as resp:
-                    if 'forget-password' in await resp.text():
-                        raise LoginFaild()
-
-
-            except LoginFaild as e:
-                if attempt < CONFIG['config']['retries']:
-                    text = (
-                        f'check login error on {attempt}\n  '
-                    )
-                    print(text)
-                    await mes(text)
-                else:
-                    text = (
-                        f'username or password may be incorrect\n  '
-                        f'check password!'
-                    )
-                    print(text)
-                    await mes(text)
-                    exit()
-            except Exception as e:
-                print(e)
-    text = (
-        f'login succeed\nuser: {CONFIG["account"]["user"]}  \n'
-        f'ip: {ip}'
+    @retry(
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
-    print(text)
-    await mes(text)
-    return
+    def num_code(self, rcid:str = None) -> dict:
+        id = rcid if rcid else self.rcid
+        resp = self.session.get(
+            url = f'{Tronclass.TRON}/api/rollcall/{id}/student_rollcalls'
+        )
+        data = json.loads(self.get_num_ans())
+        self.code = data['number_code']
+        
+        return data
 
-async def qps(count:int = 10000):
-    semaphore = asyncio.Semaphore(2000)
-    path = LOGPATH/'qps'/f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
-    succeed = 0
-    tmp_log = []
-
-    async def inner(id):
-        nonlocal succeed, tmp_log
-        async with semaphore:
-            for _ in range(5):
-                try:
-                    async with session.get(
-                        f'{TRON}/api/user/recently-visited-courses',
-                    ) as resp:
-                        data = (
-                            str(resp.url),
-                            resp.status,
-                            await resp.text()
-                        )
-                        tmp_log.append({
-                            'data': data,
-                            'id': id
-                        })
-                        succeed += 1
-                except Exception as e:
-                    print(e)
-                break
-        return
-
-    timediff = time.perf_counter()
-    async with create_session() as session:
-        session.cookie_jar.update_cookies(await login())
-        tasks = [inner(i) for i in range(count)]
-        await tqdm_asyncio.gather(*tasks, desc='testing queries per second')
-    timediff = time.perf_counter()-timediff
-
-    for i in tqdm(tmp_log, desc='saving log file'):
-        log(path, i['data'], i['id'])
-
-    text = (
-        f'Total time: {timediff}  \n'
-        f'Total request: {succeed}/{count}  \n'
-        f'Success rates: {(succeed/count):.2%}  \n'
-        f'QPS: {(count/timediff)}  \n'
-        f'file locatoin: {path}  \n'
+    @retry(
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
-    print(text)
-    await mes(text)
-    return
+    def answer_num(self, rcid=None, code=None) -> dict:
+        id = rcid if rcid else self.rcid
+        ans = code if code else self.num_code
+        resp = self.session.put(
+            url=f'{Tronclass.TRON}/api/rollcall/{id}/answer_number_rollcall',
+            json={
+                "deviceId": self.device_id,
+                "numberCode": ans
+            }
+        )
+        return json.loads(resp.text)
 
-async def qps_num(id:int = -1):
-    await number(id)
-    return
+    @retry(
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
+    )
+    def answer_radar(self, rcid=None) -> dict:
+        id = rcid if rcid else self.rcid
+        resp = self.session.put(
+            url=f'{Tronclass.TRON}/api/rollcall/{id}/answer',
+            json={}
+        )
+        return json.loads(resp.text)
+    
+    @retry(
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
+    )
+    def anser_regi(self, rcid=None) -> dict:
+        id = rcid if rcid else self.rcid
+        resp = self.session.put(
+            url=f'{Tronclass.TRON}/api/rollcall/{id}/answer_self_registration_rollcall',
+            json={}
+        )
+        return json.loads(resp.text)
 
-cnt = 0
-async def main():
-    global cnt
-    flag_day_night = False
-    flag_working = False
-    async with create_session() as session:
-        session.cookie_jar.update_cookies(await login())
-        error_cnt = 0
-        while True:
-            print(cnt, end=' ')
+    # resource
+    # @retry(
+    #     stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
+    # )
 
-            today = datetime.today().weekday()
-            schedule = CONFIG['operating'][today]
-            range_str = schedule['range']
-            start, end = [datetime.strptime(t, "%H:%M").time() for t in range_str]
-            current_time = datetime.now().time()
+    # def resources(self, page='1', size='20'):
+    #     payload = {
+    #         "conditions": {
+    #             "keyword":"",
+    #             "includeSlides":"false",
+    #             "limitTypes":
+    #                 [
+    #                     "file","video","document","image","audio","scorm","evercam","swf","wmpkg","link"
+    #                 ],
+    #             "fileType":"all",
+    #             "parentId":0,
+    #             "sourceType":"MyResourcesFile",
+    #             "no-intercept":"true"
+    #         },
+    #         "page": page,
+    #         "page_size": size
+    #     }
+    #     resp = self.session.get(
+    #         url=f'{Tronclass.TRON}/api/usr/resources',
+    #         params=payload
+    #     )    
+    #     return json.loads(resp.text)
 
-            if not schedule['enable']:
-                print('off working day\n')
-                time.sleep(3600)
-                continue
-            else:
-                if start <= current_time <= end:
-                    if not flag_day_night:
-                        flag_day_night = True
-                        text = "starting working...  \n"
-                        print(text)
-                        await mes(text)
-                    pass
-                else:
-                    if flag_day_night:
-                        flag_day_night = False
-                        text = "sleeping...  \n"
-                        print(text)
-                        await mes(text)
-                    print('off working time\n')
-                    time.sleep(300)
-                    continue
-
-            try:
-                await check_rollcall(session, cnt)
-                if not flag_working:
-                    flag_working = True
-                    text = 'has been restored'
-                    print(text)
-                    await mes(text)
-            except Exception as e:
-                if flag_working:
-                    flag_working = False
-                    text = 'fuck up'
-                    print(text)
-                    await mes(text)
-
-                if error_cnt < CONFIG['config']['retries']:
-                    text = (
-                        f'check rollcall error on {cnt}  \n'
-                        f'trying {error_cnt} times  \n'
-                        f'error message: {e}'
-                    )
-                    print(text)
-                    await mes(text)
-                    error_cnt = error_cnt+1
-                else:
-                    break
-
-            cnt = cnt+1
-            time.sleep(CONFIG['config']['Senkaku'])
-
-
-
-
-
-if __name__ == "__main__":
-    # asyncio.run(checkpw())
-    asyncio.run(qps_num())
-    # while True:
-    #     try:
-    #         asyncio.run(main())
-    #     except Exception as e:
-    #         text = (
-    #             f'fatal error on {cnt}  \n'
-    #             f'trying...  \n'
-    #             f'{e}'
-    #         )
-    #         print(text)
-    #         asyncio.run(mes(text))
