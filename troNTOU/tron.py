@@ -3,26 +3,24 @@ import random
 import string
 import re
 import json
+from ddddocr import DdddOcr
 from tenacity import retry ,wait_random
+import logging
 
-from pytesseract import image_to_string, pytesseract
-from PIL import Image
-from io import BytesIO
-
+from schemas import *
 
 class LoginFaild(Exception):
-    def __init__(self, message='Login Failed!\n'):
+    def __init__(self, message='Login Failed!'):
         super().__init__(message)
 
 class Tronclass:
     TRON = 'https://tronclass.ntou.edu.tw'
-    PATTERN = re.compile(r'(LT[^"]+)')
     CAPTCAHJPG = 'https://tccas.ntou.edu.tw/cas/captcha.jpg'
-
-    # enable if this script run on windows
-    pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    PATTERN = re.compile(r'(LT[^"]+)')
+    OCR = DdddOcr(show_ad=False)
 
     def __init__(self, account, config):
+        logging.debug("start init client")
         self.USER = account['user']
         self.PASSWD = account['passwd']
         self.CONFIG = config
@@ -35,6 +33,7 @@ class Tronclass:
         self.session: requests.Session
         self.rcid: int
         self.num_code: int
+        logging.debug('init complete')
 
 
     def set_session(self):
@@ -56,92 +55,92 @@ class Tronclass:
             lambda response, *args, **kwargs: response.raise_for_status()
         )
 
+    # ntou's special login flow 
+    # replace this function yourself if you want use it for in aother school
     @retry(
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']),
         wait=wait_random(min=1, max=1),
         reraise=True
     )
     def login(self) -> None:
+        logging.info(f'start login as {self.USER} | {self.counter}') 
         self.counter += 1
-        try:
-            self.set_session()
-            
-            lt_page = self.session.get(
-                url=f'{Tronclass.TRON}/login?next=/user/index'
-            )
-            lt = Tronclass.PATTERN.search(lt_page.text).group(0)
+        self.set_session()
 
-            jpg = self.session.get(
+        # get LT-xxxxx token and save redirect url
+        lt_page = self.session.get(
+            url=f'{Tronclass.TRON}/login?next=/user/index'
+        )
+        lt = Tronclass.PATTERN.search(lt_page.text).group(0)
+
+        # using ocr to get captcha
+        rawtxt = self.OCR.classification(
+            self.session.get(
                 url=Tronclass.CAPTCAHJPG
-            )
-            captcha = Image.open(BytesIO(jpg.content)).convert('L')
-            text = re.sub(r'[^0-9]', '', image_to_string(
-                captcha,
-                config='-c tessedit_char_whitelist=0123456789 --psm 8')
-            )
+            ).content
+        )
+        captcah = re.sub(r'[^0-9]', '', rawtxt)
 
-            data = {
-                'username': self.USER,
-                'password': self.PASSWD,
-                'captcha': text,
-                'lt': lt,
-                'execution': 'e1s1',
-                '_eventId': 'submit',
-                'submit': '登錄'
-            }
+        payload = {
+            'username': self.USER,
+            'password': self.PASSWD,
+            'captcha': captcah,
+            'lt': lt,
+            'execution': 'e1s1',
+            '_eventId': 'submit',
+            'submit': '登錄'
+        }
 
-            resp = self.session.post(
-                url=lt_page.url,
-                data=data
-            )
-            if 'forget-password' in resp.text:
-                raise LoginFaild()
+        resp = self.session.post(
+            url=lt_page.url,
+            data=payload
+        )
+        if 'forget-password' in resp.text:
+            logging.warning(f'{e} | {self.counter}')
+            raise LoginFaild()
 
-            return
+        logging.info('login successed')
+        return
 
-        except LoginFaild as e:
-            print(f'{e} | {self.counter}\n')
-            raise
 
-        except Exception as e:
-            print(f'{e} | {self.counter}\n')
-
-    ### pure api endpoint
+# -------------------------------------------
+# Pure API Endpoints
+# -------------------------------------------
     @retry(
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
-    def re_visited(self) -> str:
+    def re_visited(self) -> VisitedCourses:
         resp = self.session.get(
             url = f'{Tronclass.TRON}/api/user/recently-visited-courses'
         )
-        return json.loads(resp.text)
-    
-    @retry(
-        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
-    )
-    def rollcall(self) -> dict:
-        resp = self.session.get(
-            url=f'{Tronclass.TRON}/api/radar/rollcalls?api_version=1.1.0'
-        )
-        return json.loads(resp.text)
+        return VisitedCourses.model_validate_json(resp.text)
 
     @retry(
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
-    def num_code(self, rcid:str = None) -> dict:
+    def rollcall(self) -> Rollcall:
+        resp = self.session.get(
+            url=f'{Tronclass.TRON}/api/radar/rollcalls?api_version=1.1.0'
+        )
+        return Rollcall.model_validate_json(resp.text)
+
+    @retry(
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
+    )
+    def student_rollcall(self, rcid:str | None = None) -> StudentRollcall:
+        # test case 2145183
         id = rcid if rcid else self.rcid
         resp = self.session.get(
             url = f'{Tronclass.TRON}/api/rollcall/{id}/student_rollcalls'
         )
-        data = json.loads(self.get_num_ans())
-        self.code = data['number_code']
-        
-        return data
+        ret = StudentRollcall.model_validate_json(resp.text)
+        logging.info(f'rollcall ID: {id}, code: {ret.number_code}')
+        return ret
 
     @retry(
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
-    def answer_num(self, rcid=None, code=None) -> dict:
+    def answer_num(self, rcid:str|None = None, code:str|None = None) -> dict:
         id = rcid if rcid else self.rcid
         ans = code if code else self.num_code
         resp = self.session.put(
@@ -156,7 +155,7 @@ class Tronclass:
     @retry(
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
-    def answer_radar(self, rcid=None) -> dict:
+    def answer_radar(self, rcid:str | None = None) -> dict:
         id = rcid if rcid else self.rcid
         resp = self.session.put(
             url=f'{Tronclass.TRON}/api/rollcall/{id}/answer',
@@ -167,7 +166,7 @@ class Tronclass:
     @retry(
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
-    def anser_regi(self, rcid=None) -> dict:
+    def anser_regi(self, rcid:str | None = None) -> dict:
         id = rcid if rcid else self.rcid
         resp = self.session.put(
             url=f'{Tronclass.TRON}/api/rollcall/{id}/answer_self_registration_rollcall',
