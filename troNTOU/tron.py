@@ -128,12 +128,14 @@ class Tronclass:
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
     )
     def student_rollcall(self, rcid:str | None = None) -> StudentRollcall:
+        # to get 
         # test case 2145183
         id = rcid if rcid else self.rcid
         resp = self.session.get(
             url = f'{Tronclass.TRON}/api/rollcall/{id}/student_rollcalls'
         )
         ret = StudentRollcall.model_validate_json(resp.text)
+        self.num_code = ret.number_code
         logging.info(f'rollcall ID: {id}, code: {ret.number_code}')
         return ret
 

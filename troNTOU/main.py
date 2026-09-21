@@ -29,61 +29,60 @@ YAMLPATH = Path(args.config) if args.config else Path(__file__).parent.parent / 
 with open(YAMLPATH, 'r', encoding='utf-8') as file:
     CONFIG = yaml.safe_load(file)
 
-def check_rollcell(data: Rollcall) -> tuple[int, str]:
-
-    if data.rollcalls:
-        inner_data = data.rollcalls[0]
-        
-        if inner_data.status == "on_call_fine":
-            return 0, None
-        elif inner_data.is_number:
-            return 1, inner_data
-        elif inner_data.is_radar:
-            # TODO: radar
-            pass
-        else:
-            print("maybe qrcode")
-    else:
-        return -1, None
-
 
 def main():
     dummy = Tronclass(CONFIG['account'], CONFIG['config'])
 
-    while True:
-        dummy.login()
-        dummy.student_rollcall('2145183') 
-        time.sleep(1)
-    return
     _night = False
     _workday = False
     while True:
         schedule = CONFIG['operating'][datetime.today().weekday()]
         start, end = [datetime.strptime(t, "%H:%M").time() for t in schedule['range']]
-        current_time = datetime.now().time()
 
         if not schedule['enable']:
+            logging.info('off working day')
+            logging.info('sleep...')
+
             time.sleep(3600)
         else:
             if start <= datetime.now().time() <= end:
                 if not _night:
                     _night = True
+                    logging.info('starting working')
             else:
                 if _workday:
                     _workday = False
-            
+                    logging.info('off working time')
+
+                logging.info('sleep...')
                 time.sleep(300)
                 continue
 
         try:
-            check_rollcell(dummy.rollcall())
+            data = dummy.rollcall()
+            if data.rollcalls:
+                inner_data = data.rollcalls[0]
+                if inner_data.status == "on_call_fine":
+                    logging.info(f'ID: {inner_data.rollcall_id} is rollcalled')
+                elif inner_data.is_number:
+                    logging.info(f'ID: {inner_data.rollcall_id} starting Number rollcall')
+                    dummy.student_rollcall()
+                    dummy.answer_num()
+                elif inner_data.is_radar:
+                    logging.info(f'ID: {inner_data.rollcall_id} starting Location rollcall')
+                    dummy.answer_radar()
+                else:
+                    logging.info(f'ID: {inner_data.rollcall_id} rollcal type is not souppert.')
+                    logging.debug('you fuck up :)')
             if not _workday:
                 _workday = True
             pass
         except Exception as e:
             pass
 
-
+        logging.info(f'{dummy.counter} - checking ')
+        dummy.counter += 1
+        time.sleep(1)
 
 main()
 
