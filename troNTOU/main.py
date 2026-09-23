@@ -14,7 +14,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 logging.basicConfig(
     format='[%(asctime)s.%(msecs)03d] %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S', 
-    level=logging.DEBUG
+    level=logging.INFO
 )
 
 
@@ -32,7 +32,7 @@ with open(YAMLPATH, 'r', encoding='utf-8') as file:
 
 def main():
     dummy = Tronclass(CONFIG['account'], CONFIG['config'])
-
+    dummy.login()
     _night = False
     _workday = False
     while True:
@@ -83,7 +83,7 @@ def main():
             pass
 
         dummy.counter += 1
-        time.sleep(1)
+        time.sleep()
 
 main()
 
