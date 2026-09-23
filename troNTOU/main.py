@@ -83,7 +83,7 @@ def main():
             pass
 
         dummy.counter += 1
-        time.sleep()
+        time.sleep(2)
 
 main()
 
