@@ -59,6 +59,7 @@ def main():
                 continue
 
         try:
+            logging.info(f'{dummy.counter} - checking ')
             data = dummy.rollcall()
             if data.rollcalls:
                 inner_data = data.rollcalls[0]
@@ -78,9 +79,9 @@ def main():
                 _workday = True
             pass
         except Exception as e:
+            logging.error(f'{e}')
             pass
 
-        logging.info(f'{dummy.counter} - checking ')
         dummy.counter += 1
         time.sleep(1)
 
