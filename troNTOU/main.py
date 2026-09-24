@@ -11,10 +11,16 @@ from tron import Tronclass
 from schemas import *
 
 sys.stdout.reconfigure(encoding='utf-8')
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+stderr_handler = logging.StreamHandler(sys.stderr)
+stderr_handler.setLevel(logging.WARNING)
 logging.basicConfig(
     format='[%(asctime)s.%(msecs)03d] %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S', 
-    level=logging.DEBUG
+    level=logging.DEBUG,
+    handlers=[stdout_handler, stderr_handler],
+    force=True,
 )
 
 
