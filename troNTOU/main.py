@@ -14,7 +14,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 logging.basicConfig(
     format='[%(asctime)s.%(msecs)03d] %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S', 
-    level=logging.INFO
+    level=logging.DEBUG
 )
 
 
@@ -27,19 +27,20 @@ LOGPATH = Path(args.log) if args.log else Path(__file__).parent.parent / 'log'
 YAMLPATH = Path(args.config) if args.config else Path(__file__).parent.parent / 'config.yaml'
 
 with open(YAMLPATH, 'r', encoding='utf-8') as file:
-    CONFIG = yaml.safe_load(file)
+    raw_data = yaml.safe_load(file)
+    CONFIG = Config.model_validate(raw_data)
 
 
 def main():
-    dummy = Tronclass(CONFIG['account'], CONFIG['config'])
+    dummy = Tronclass(CONFIG)
     dummy.login()
     _night = False
     _workday = False
     while True:
-        schedule = CONFIG['operating'][datetime.today().weekday()]
-        start, end = [datetime.strptime(t, "%H:%M").time() for t in schedule['range']]
+        schedule = CONFIG.operating[datetime.today().weekday()]
+        start, end = [datetime.strptime(t, "%H:%M").time() for t in schedule.range]
 
-        if not schedule['enable']:
+        if not schedule.enable:
             logging.info('off working day')
             logging.info('sleep...')
 
@@ -83,8 +84,6 @@ def main():
             pass
 
         dummy.counter += 1
-        time.sleep(2)
+        time.sleep(CONFIG.config.Senkaku)
 
 main()
-
-    

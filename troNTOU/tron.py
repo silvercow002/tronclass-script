@@ -19,11 +19,9 @@ class Tronclass:
     PATTERN = re.compile(r'(LT[^"]+)')
     OCR = DdddOcr(show_ad=False)
 
-    def __init__(self, account, config):
+    def __init__(self, config):
         logging.debug("start init client")
-        self.USER = account['user']
-        self.PASSWD = account['passwd']
-        self.CONFIG = config
+        self.config:Config = config
 
         self.counter = 0
         self.device_id = ''.join(
@@ -63,7 +61,7 @@ class Tronclass:
         reraise=True
     )
     def login(self) -> None:
-        logging.info(f'start login as {self.USER} | {self.counter}') 
+        logging.info(f'start login as {self.config.account.user} | {self.counter}') 
         self.counter += 1
         self.set_session()
 
@@ -82,8 +80,8 @@ class Tronclass:
         captcah = re.sub(r'[^0-9]', '', rawtxt)
 
         payload = {
-            'username': self.USER,
-            'password': self.PASSWD,
+            'username': self.config.account.user,
+            'password': self.config.account.passwd,
             'captcha': captcah,
             'lt': lt,
             'execution': 'e1s1',
@@ -96,7 +94,7 @@ class Tronclass:
             data=payload
         )
         if 'forget-password' in resp.text:
-            logging.warning(f'{e} | {self.counter}')
+            logging.warning(f'fuck up | {self.counter}')
             raise LoginFaild()
 
         logging.info('login successed')
@@ -107,13 +105,15 @@ class Tronclass:
 # Pure API Endpoints
 # -------------------------------------------
     @retry(
-        stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
+        stop=lambda rs: rs.attempt_number >= int(rs.args[0].config.retries), wait=wait_random(min=1, max=1), reraise=True
     )
     def re_visited(self) -> VisitedCourses:
         resp = self.session.get(
             url = f'{Tronclass.TRON}/api/user/recently-visited-courses'
         )
-        return VisitedCourses.model_validate_json(resp.text)
+        ret = VisitedCourses.model_validate_json(resp.text)
+        logging.debug(ret)
+        return ret
 
     @retry(
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True
@@ -122,7 +122,9 @@ class Tronclass:
         resp = self.session.get(
             url=f'{Tronclass.TRON}/api/radar/rollcalls?api_version=1.1.0'
         )
-        return Rollcall.model_validate_json(resp.text)
+        ret = Rollcall.model_validate_json(resp.text)
+        logging.debug(ret)
+        return ret
 
     @retry(
         stop=lambda rs: rs.attempt_number >= int(rs.args[0].CONFIG['retries']), wait=wait_random(min=1, max=1), reraise=True

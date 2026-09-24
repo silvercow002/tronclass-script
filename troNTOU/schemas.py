@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 # i like gemini-chan
-__all__ = ["Rollcall", "VisitedCourses", "StudentRollcall"]
+__all__ = ["Rollcall", "VisitedCourses", "StudentRollcall", "Config"]
 
 # --- rollcall ---
 class _rollcall(BaseModel):
@@ -108,3 +108,31 @@ class StudentRollcall(BaseModel):
     student_rollcalls: list[StudentRollcall]
     title: str
     type: str
+
+# --- user's config ---
+class Account(BaseModel):
+    user: str
+    passwd: str
+
+class NotificationChannel(BaseModel):
+    enable: bool
+    key: str
+    chat: str
+
+class Notifications(BaseModel):
+    tg: NotificationChannel
+    dc: NotificationChannel
+
+class GeneralConfig(BaseModel):
+    enable_log: bool
+    Senkaku: int
+    retries: int
+class OperatingDay(BaseModel):
+    enable: bool
+    range: list[str]
+
+class Config(BaseModel):
+    account: Account
+    notifications: Notifications
+    config: GeneralConfig
+    operating: dict[int, OperatingDay]
