@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # i like gemini-chan
 __all__ = ["Rollcall", "VisitedCourses", "StudentRollcall", "Config"]
@@ -125,8 +125,8 @@ class Notifications(BaseModel):
 
 class GeneralConfig(BaseModel):
     enable_log: bool
-    Senkaku: int
-    retries: int
+    Senkaku: int = Field(ge=1)
+    retries: int = Field(ge=1)
 class OperatingDay(BaseModel):
     enable: bool
     range: list[str]
