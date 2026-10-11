@@ -1,5 +1,5 @@
-aiohttp>=3.9.5
-PyYAML>=6.0.2
-tqdm>=4.66.4
-Pillow>=10.3.0
-pytesseract>=0.3.10
+PyYAML==6.0.3
+pydantic==2.13.5
+requests==2.34.2
+tenacity==9.1.4
+ddddocr==1.6.1
