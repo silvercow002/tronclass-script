@@ -1,0 +1,77 @@
+name: Build executables
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux-x86_64
+          - os: windows-2022
+            target: windows-x86_64
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x86_64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Build and package executable
+        run: python scripts/build.py ${{ matrix.target }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: troNTOU-${{ matrix.target }}
+          path: release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  fedora:
+    name: Build fedoraLinux-43-x86_64
+    runs-on: ubuntu-24.04
+    container: fedora:43
+    timeout-minutes: 45
+    steps:
+      - name: Install Fedora build tools
+        run: dnf install -y git python3.12 python3.12-devel python3-pip binutils libstdc++ libgomp
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install build dependencies
+        run: |
+          python3.12 -m venv --without-pip .venv-build
+          python3 -m pip --python .venv-build install -r requirements-build.txt
+      - name: Build and package executable
+        run: .venv-build/bin/python scripts/build.py fedoraLinux-43-x86_64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: troNTOU-fedoraLinux-43-x86_64
+          path: release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

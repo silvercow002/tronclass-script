@@ -10,3 +10,7 @@ log_/
 *test*
 *copy*
 _*
+/build/
+/dist/
+/release/
+/.venv-build/

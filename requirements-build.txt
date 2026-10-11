@@ -1,0 +1,4 @@
+-r requirements.txt
+pyinstaller==6.22.3
+# Newer ONNX Runtime releases no longer provide Intel macOS wheels.
+onnxruntime==1.23.2; sys_platform == "darwin" and platform_machine == "x86_64"

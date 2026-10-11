@@ -1,0 +1,41 @@
+account:
+  user: '學號'
+  passwd: '密碼'
+
+notifications:
+  tg:
+    enable: False
+    key: ''
+    chat: ''
+  dc:
+    enable: False
+    key: ''
+    chat: ''
+
+config:
+  enable_log: true
+  Senkaku: 1
+  retries: 20
+
+operating:
+  0:
+    enable: True
+    range: ["9:00", "17:00"]
+  1:
+    enable: True
+    range: ["9:00", "17:00"]
+  2:
+    enable: True
+    range: ["9:00", "17:00"]
+  3:
+    enable: True
+    range: ["9:00", "17:00"]
+  4:
+    enable: True
+    range: ["9:00", "17:00"]
+  5:
+    enable: True
+    range: ["9:00", "17:00"]
+  6:
+    enable: True
+    range: ["9:00", "17:00"]
