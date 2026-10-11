@@ -1,5 +1,5 @@
-PyYAML
-pydantic
-requests
-tenacity
-ddddocr
+PyYAML==6.0.3
+pydantic==2.13.5
+requests==2.34.2
+tenacity==9.1.4
+ddddocr==1.6.1
