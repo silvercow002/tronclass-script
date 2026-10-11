@@ -2,6 +2,8 @@
 
 import argparse
 import hashlib
+import importlib.util
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -22,15 +24,27 @@ def main():
     build_dir.mkdir(exist_ok=True)
     release_dir.mkdir(exist_ok=True)
 
+    # DdddOcr() with default options only loads common_old.onnx; skipping the
+    # unused beta (common.onnx) and detection (common_det.onnx) models saves ~70 MB.
+    ocr_model = Path(importlib.util.find_spec('ddddocr').origin).parent / 'common_old.onnx'
+    # Stripping symbols is safe on Linux; on macOS it can break code signatures.
+    strip = ['--strip'] if 'linux' in args.target.lower() else []
+
     subprocess.run([
         sys.executable, '-m', 'PyInstaller',
         '--noconfirm', '--clean', '--onefile', '--console', '--noupx',
+        *strip,
+        # Drop docstrings and asserts from the bundled bytecode.
+        '--optimize', '2',
+        # Standard-library modules the app never imports at runtime.
+        *[arg for module in ('tkinter', 'unittest', 'doctest', 'pydoc_data', 'test', 'lib2to3')
+          for arg in ('--exclude-module', module)],
         '--name', 'troNTOU',
         '--paths', str(root / 'troNTOU'),
         '--specpath', str(build_dir),
         '--workpath', str(build_dir / 'pyinstaller'),
         '--distpath', str(dist_dir),
-        '--collect-data', 'ddddocr',
+        '--add-data', f'{ocr_model}{os.pathsep}ddddocr',
         '--collect-binaries', 'onnxruntime',
         str(root / 'troNTOU' / 'main.py'),
     ], cwd=root, check=True)
