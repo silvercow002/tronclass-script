@@ -42,8 +42,10 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install -r requirements-build.txt
       - name: Use headless OpenCV
-        # ddddocr depends on the full opencv-python; the headless build has the
-        # same cv2 API without GUI/Qt libraries, which keeps the executable smaller.
+        # ddddocr installs the full opencv-python on Windows/macOS (Linux already
+        # gets opencv-python-headless); the headless build has the same cv2 API
+        # without GUI libraries, which keeps the executable smaller.
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           version=$(python -c "from importlib.metadata import version; print(version('opencv-python'))")
@@ -74,11 +76,6 @@ jobs:
         run: |
           python3.12 -m venv --without-pip .venv-build
           python3 -m pip --python .venv-build install -r requirements-build.txt
-      - name: Use headless OpenCV
-        run: |
-          version=$(.venv-build/bin/python -c "from importlib.metadata import version; print(version('opencv-python'))")
-          python3 -m pip --python .venv-build uninstall -y opencv-python
-          python3 -m pip --python .venv-build install "opencv-python-headless==$version"
       - name: Build and package executable
         run: .venv-build/bin/python scripts/build.py fedoraLinux-43-x86_64
       - uses: actions/upload-artifact@v7
