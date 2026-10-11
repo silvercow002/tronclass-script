@@ -100,6 +100,12 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           sha256sum --check *.sha256
+          # Merge the per-archive checksums into a single file for the release.
+          checksums="troNTOU-${RELEASE_TAG}.sha256"
+          cat *.sha256 | sort -k2 > "../$checksums"
+          rm -f *.sha256
+          mv "../$checksums" .
+          sha256sum --check "$checksums"
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" ./* --clobber
           else
