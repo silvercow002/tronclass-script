@@ -27,13 +27,12 @@ def main():
     # DdddOcr() with default options only loads common_old.onnx; skipping the
     # unused beta (common.onnx) and detection (common_det.onnx) models saves ~70 MB.
     ocr_model = Path(importlib.util.find_spec('ddddocr').origin).parent / 'common_old.onnx'
-    # Stripping symbols is safe on Linux; on macOS it can break code signatures.
-    strip = ['--strip'] if 'linux' in args.target.lower() else []
+    # Do not use --strip: it corrupts patchelf-modified manylinux libraries
+    # (e.g. numpy's bundled OpenBLAS: "ELF load command ... not page-aligned").
 
     subprocess.run([
         sys.executable, '-m', 'PyInstaller',
         '--noconfirm', '--clean', '--onefile', '--console', '--noupx',
-        *strip,
         # Drop docstrings and asserts from the bundled bytecode.
         '--optimize', '2',
         # Standard-library modules the app never imports at runtime.
