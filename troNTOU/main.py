@@ -41,7 +41,9 @@ class Notifier:
                 with requests.post(url, timeout=self.REQUEST_TIMEOUT, **kwargs) as response:
                     response.raise_for_status()
                     if name == 'tg' and response.json().get('ok') is not True:
-                        logging.warning('tg notification rejected by API')
+                        logging.warning('%s notification rejected by API', name)
+                        continue
+                logging.info('%s notification sent', name)
             except (requests.RequestException, ValueError) as error:
                 # Request exceptions may include the bot token in their URL.
                 logging.warning('%s notification failed (%s)', name, type(error).__name__)
@@ -139,6 +141,7 @@ def check_rollcalls(client, notified_events, notifier):
 
 def run(config):
     notifier = Notifier(config)
+    next_alive = time.monotonic() + 3600
     client = Tronclass(config)
     try:
         client.login()
@@ -150,6 +153,10 @@ def run(config):
     checking_failed = False
     notified_events = {}
     while True:
+        if time.monotonic() >= next_alive:
+            logging.info('alive')
+            notifier.send('alive')
+            next_alive = time.monotonic() + 3600
         now = datetime.now()
         schedule = config.operating[now.weekday()]
         if not schedule.enable:
@@ -157,7 +164,7 @@ def run(config):
                 notifier.send('Off working day')
             working = False
             logging.info('off working day; sleep...')
-            time.sleep(3600)
+            time.sleep(max(0, min(3600, next_alive - time.monotonic())))
             continue
 
         start, end = [datetime.strptime(t, '%H:%M').time() for t in schedule.range]
@@ -167,7 +174,7 @@ def run(config):
                 notifier.send('Off working time')
             working = False
             logging.debug('sleep...')
-            time.sleep(300)
+            time.sleep(max(0, min(300, next_alive - time.monotonic())))
             continue
 
         if not working:
@@ -187,7 +194,7 @@ def run(config):
                 checking_failed = True
 
         client.counter += 1
-        time.sleep(config.config.Senkaku)
+        time.sleep(max(0, min(config.config.Senkaku, next_alive - time.monotonic())))
 
 
 def main(argv=None):
@@ -199,13 +206,18 @@ def main(argv=None):
         '--rollcall-id', help='Fetch one rollcall detail and exit without submitting an answer',
     )
     args = parser.parse_args(argv)
-    config_path = args.config or Path(__file__).parent.parent / 'config.yaml'
+    app_dir = (
+        Path(sys.executable).resolve().parent
+        if getattr(sys, 'frozen', False)
+        else Path(__file__).resolve().parent.parent
+    )
+    config_path = args.config or app_dir / 'config.yaml'
     with config_path.open('r', encoding='utf-8') as file:
         config = Config.model_validate(yaml.safe_load(file))
 
     log_dir = args.log
     if log_dir is None and config.config.enable_log:
-        log_dir = Path(__file__).parent.parent / 'log'
+        log_dir = app_dir / 'log'
     configure_logging(args.debug, log_dir)
     logging.info('using config: %s; account: ***%s', config_path.resolve(), config.account.user[-3:])
 
