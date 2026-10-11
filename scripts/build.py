@@ -40,6 +40,7 @@ def main():
           for arg in ('--exclude-module', module)],
         '--name', 'troNTOU',
         '--paths', str(root / 'troNTOU'),
+        '--paths', str(root / 'scripts' / 'stubs'),
         '--specpath', str(build_dir),
         '--workpath', str(build_dir / 'pyinstaller'),
         '--distpath', str(dist_dir),
@@ -48,8 +49,18 @@ def main():
         str(root / 'troNTOU' / 'main.py'),
     ], cwd=root, check=True)
 
+    # Verify that OCR classification works end-to-end with the cv2 stub before packaging.
+    from io import BytesIO
+    from PIL import Image
+    sys.path.insert(0, str(root / 'scripts' / 'stubs'))
+    sys.path.insert(0, str(root / 'troNTOU'))
+    from tron import Tronclass
+    buf = BytesIO()
+    Image.new('RGB', (100, 40), color='white').save(buf, format='JPEG')
+    Tronclass.OCR.classification(buf.getvalue())
+
     executable = dist_dir / ('troNTOU.exe' if sys.platform == 'win32' else 'troNTOU')
-    # Loads the bundled OCR model and native libraries without signing in or sending messages.
+    # Loads the bundled OCR model, cv2 stub, and native libraries without signing in.
     subprocess.run([str(executable), '--help'], cwd=dist_dir, check=True, timeout=120)
 
     name = f'troNTOU-{args.target}'
