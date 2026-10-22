@@ -107,7 +107,7 @@ jobs:
         run: |
           sha256sum --check *.sha256
           # Merge the per-archive checksums into a single file for the release.
-          checksums="troNTOU-${RELEASE_TAG}.sha256"
+          checksums="hashes.sha256"
           cat *.sha256 | sort -k2 > "../$checksums"
           rm -f *.sha256
           mv "../$checksums" .
